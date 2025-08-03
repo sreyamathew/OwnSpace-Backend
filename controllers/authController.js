@@ -214,6 +214,100 @@ const updateProfile = async (req, res) => {
   }
 };
 
+// @desc    Register new agent (Admin only)
+// @route   POST /api/auth/register-agent
+// @access  Private (Admin)
+const registerAgent = async (req, res) => {
+  try {
+    const { 
+      name, 
+      email, 
+      password, 
+      phone, 
+      licenseNumber, 
+      agency, 
+      experience, 
+      specialization,
+      address,
+      city,
+      state,
+      zipCode,
+      bio
+    } = req.body;
+
+    // Validation
+    if (!name || !email || !password || !licenseNumber || !agency) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide name, email, password, license number, and agency'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findByEmail(email);
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already exists with this email'
+      });
+    }
+
+    // Create new agent
+    const agent = new User({
+      name,
+      email,
+      password,
+      phone,
+      userType: 'agent', // Set userType to agent
+      address: {
+        street: address,
+        city,
+        state,
+        zipCode
+      },
+      // Add agent-specific fields (you might want to extend the User model for these)
+      agentProfile: {
+        licenseNumber,
+        agency,
+        experience,
+        specialization,
+        bio
+      }
+    });
+
+    await agent.save();
+
+    // Get agent profile without password
+    const agentProfile = agent.getPublicProfile();
+
+    res.status(201).json({
+      success: true,
+      message: 'Agent registered successfully',
+      data: {
+        agent: agentProfile
+      }
+    });
+
+  } catch (error) {
+    console.error('Agent registration error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation Error',
+        errors: messages
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error during agent registration'
+    });
+  }
+};
+
 // @desc    Logout user (client-side token removal)
 // @route   POST /api/auth/logout
 // @access  Private
@@ -229,5 +323,6 @@ module.exports = {
   login,
   getProfile,
   updateProfile,
+  registerAgent,
   logout
 };

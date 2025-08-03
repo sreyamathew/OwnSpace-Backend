@@ -60,6 +60,23 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Property'
   }],
+  agentProfile: {
+    licenseNumber: {
+      type: String,
+      required: function() { return this.userType === 'agent'; }
+    },
+    agency: {
+      type: String,
+      required: function() { return this.userType === 'agent'; }
+    },
+    experience: String,
+    specialization: String,
+    bio: String,
+    isVerified: {
+      type: Boolean,
+      default: false
+    }
+  },
   createdAt: {
     type: Date,
     default: Date.now

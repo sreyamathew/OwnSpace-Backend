@@ -5,9 +5,10 @@ const {
   login,
   getProfile,
   updateProfile,
+  registerAgent,
   logout
 } = require('../controllers/authController');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 
 // @route   POST /api/auth/register
 // @desc    Register a new user
@@ -28,6 +29,11 @@ router.get('/profile', protect, getProfile);
 // @desc    Update user profile
 // @access  Private
 router.put('/profile', protect, updateProfile);
+
+// @route   POST /api/auth/register-agent
+// @desc    Register a new agent (Admin only)
+// @access  Private (Admin only)
+router.post('/register-agent', protect, authorize('admin'), registerAgent);
 
 // @route   POST /api/auth/logout
 // @desc    Logout user
