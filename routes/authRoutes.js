@@ -7,7 +7,9 @@ const {
   updateProfile,
   registerAgent,
   logout,
-  verifyOtp
+  verifyOtp,
+  forgotPassword,
+  resetPassword
 } = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -45,5 +47,15 @@ router.post('/logout', protect, logout);
 // @desc    Verify OTP for user registration
 // @access  Public
 router.post('/verify-otp', verifyOtp);
+
+// @route   POST /api/auth/forgot-password
+// @desc    Send password reset email
+// @access  Public
+router.post('/forgot-password', forgotPassword);
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password with token
+// @access  Public
+router.post('/reset-password', resetPassword);
 
 module.exports = router;
