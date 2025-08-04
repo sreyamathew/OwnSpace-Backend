@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
+const transporter = require('../utils/mailer');
+const crypto = require('crypto');
 
 // JWT Secret (In production, use environment variable)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
@@ -35,15 +37,28 @@ const register = async (req, res) => {
     }
 
     // Create new user
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes
     const user = new User({
       name,
       email,
       password,
       phone,
-      userType: userType || 'buyer'
+      userType: userType || 'buyer',
+      otp,
+      otpExpiry
     });
 
     await user.save();
+
+    // Send OTP email
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: 'Your OTP Code',
+      text: `Your OTP code is: ${otp}`,
+      html: `<b>Your OTP code is: ${otp}</b>`
+    });
 
     // Generate token
     const token = generateToken(user._id);
@@ -53,10 +68,10 @@ const register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'User registered successfully',
+      message: 'User registered successfully. OTP sent to email.',
       data: {
         user: userProfile,
-        token
+        // Do not send token until verified
       }
     });
 
@@ -318,11 +333,79 @@ const logout = async (req, res) => {
   });
 };
 
+// @desc    Verify OTP for user registration
+// @route   POST /api/auth/verify-otp
+// @access  Public
+const verifyOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    // Validation
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email and OTP'
+      });
+    }
+
+    const user = await User.findByEmail(email);
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already verified'
+      });
+    }
+
+    if (user.otp !== otp || user.otpExpiry < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    // Mark user as verified
+    user.isVerified = true;
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    await user.save();
+
+    // Generate token after verification
+    const token = generateToken(user._id);
+
+    // Get user profile without password
+    const userProfile = user.getPublicProfile();
+
+    res.status(200).json({
+      success: true,
+      message: 'OTP verified successfully',
+      data: {
+        user: userProfile,
+        token
+      }
+    });
+
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during OTP verification'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfile,
   registerAgent,
-  logout
+  logout,
+  verifyOtp
 };

@@ -6,7 +6,8 @@ const {
   getProfile,
   updateProfile,
   registerAgent,
-  logout
+  logout,
+  verifyOtp
 } = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -39,5 +40,10 @@ router.post('/register-agent', protect, authorize('admin'), registerAgent);
 // @desc    Logout user
 // @access  Private
 router.post('/logout', protect, logout);
+
+// @route   POST /api/auth/verify-otp
+// @desc    Verify OTP for user registration
+// @access  Public
+router.post('/verify-otp', verifyOtp);
 
 module.exports = router;
