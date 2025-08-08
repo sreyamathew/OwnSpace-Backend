@@ -18,8 +18,19 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required'],
+    required: function() {
+      return !this.googleId; // Password not required for Google OAuth users
+    },
     minlength: [6, 'Password must be at least 6 characters long']
+  },
+  googleId: {
+    type: String,
+    sparse: true // Allows multiple null values but unique non-null values
+  },
+  provider: {
+    type: String,
+    enum: ['local', 'google'],
+    default: 'local'
   },
   phone: {
     type: String,
@@ -104,8 +115,7 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for better query performance
-userSchema.index({ email: 1 });
+// Index for better query performance (email index already created by unique: true)
 userSchema.index({ userType: 1 });
 
 // Pre-save middleware to hash password

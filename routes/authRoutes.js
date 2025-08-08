@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const passport = require('../config/passport');
 const {
   register,
   login,
@@ -9,7 +10,9 @@ const {
   logout,
   verifyOtp,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  googleCallback,
+  googleFailure
 } = require('../controllers/authController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -57,5 +60,28 @@ router.post('/forgot-password', forgotPassword);
 // @desc    Reset password with token
 // @access  Public
 router.post('/reset-password', resetPassword);
+
+// @route   GET /api/auth/google
+// @desc    Google OAuth authentication
+// @access  Public
+router.get('/google', passport.authenticate('google', {
+  scope: ['profile', 'email']
+}));
+
+// @route   GET /api/auth/google/callback
+// @desc    Google OAuth callback
+// @access  Public
+router.get('/google/callback', 
+  passport.authenticate('google', { 
+    failureRedirect: '/api/auth/google/failure',
+    session: false 
+  }),
+  googleCallback
+);
+
+// @route   GET /api/auth/google/failure
+// @desc    Google OAuth failure
+// @access  Public
+router.get('/google/failure', googleFailure);
 
 module.exports = router;

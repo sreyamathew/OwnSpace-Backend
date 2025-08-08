@@ -563,6 +563,39 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// @desc    Google OAuth callback
+// @route   GET /api/auth/google/callback
+// @access  Public
+const googleCallback = async (req, res) => {
+  try {
+    // User is authenticated via passport
+    const user = req.user;
+    
+    if (!user) {
+      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_failed`);
+    }
+
+    // Generate JWT token
+    const token = generateToken(user._id);
+    
+    // Redirect to frontend with token
+    const redirectUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/auth/callback?token=${token}&user=${encodeURIComponent(JSON.stringify(user.getPublicProfile()))}`;
+    
+    res.redirect(redirectUrl);
+    
+  } catch (error) {
+    console.error('Google callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=server_error`);
+  }
+};
+
+// @desc    Google OAuth failure
+// @route   GET /api/auth/google/failure
+// @access  Public
+const googleFailure = (req, res) => {
+  res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=google_auth_failed`);
+};
+
 module.exports = {
   register,
   login,
@@ -572,5 +605,7 @@ module.exports = {
   logout,
   verifyOtp,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  googleCallback,
+  googleFailure
 };
