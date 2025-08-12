@@ -286,7 +286,8 @@ const registerAgent = async (req, res) => {
         agency,
         experience,
         specialization,
-        bio
+        bio,
+        isVerified: true // Set agents as active by default
       }
     });
 
