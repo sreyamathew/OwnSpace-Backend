@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const passport = require('../config/passport');
+const User = require('../models/User');
 const {
   register,
   login,
@@ -83,5 +84,40 @@ router.get('/google/callback',
 // @desc    Google OAuth failure
 // @access  Public
 router.get('/google/failure', googleFailure);
+
+// @route   POST /api/auth/make-admin
+// @desc    Make current user admin (for testing purposes)
+// @access  Private
+router.post('/make-admin', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    user.userType = 'admin';
+    user.isVerified = true;
+    await user.save();
+
+    const userProfile = user.getPublicProfile();
+
+    res.status(200).json({
+      success: true,
+      message: 'User updated to admin successfully',
+      data: {
+        user: userProfile
+      }
+    });
+  } catch (error) {
+    console.error('Make admin error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
 
 module.exports = router;

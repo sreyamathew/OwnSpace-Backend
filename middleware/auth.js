@@ -7,15 +7,20 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-here';
 // Middleware to protect routes
 const protect = async (req, res, next) => {
   try {
+    console.log('=== AUTHENTICATION DEBUG ===');
+    console.log('Headers:', req.headers.authorization ? 'Authorization header present' : 'No authorization header');
+    
     let token;
 
     // Check for token in headers
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
+      console.log('Token extracted:', token ? 'Token present' : 'No token');
     }
 
     // Check if token exists
     if (!token) {
+      console.log('❌ Authentication failed: No token provided');
       return res.status(401).json({
         success: false,
         message: 'Access denied. No token provided.'
@@ -25,11 +30,14 @@ const protect = async (req, res, next) => {
     try {
       // Verify token
       const decoded = jwt.verify(token, JWT_SECRET);
+      console.log('Token decoded successfully:', decoded);
       
       // Get user from token
       const user = await User.findById(decoded.userId).select('-password');
+      console.log('User found:', user ? `User ID: ${user._id}, Type: ${user.userType}` : 'User not found');
 
       if (!user) {
+        console.log('❌ Authentication failed: User not found');
         return res.status(401).json({
           success: false,
           message: 'Token is valid but user not found'
@@ -39,9 +47,11 @@ const protect = async (req, res, next) => {
       // Add user to request object
       req.user = decoded;
       req.userProfile = user;
+      console.log('✅ Authentication successful');
       next();
 
     } catch (jwtError) {
+      console.log('❌ Authentication failed: Invalid token', jwtError.message);
       return res.status(401).json({
         success: false,
         message: 'Invalid token'
@@ -60,7 +70,14 @@ const protect = async (req, res, next) => {
 // Middleware to check user roles
 const authorize = (...roles) => {
   return (req, res, next) => {
+    console.log('=== AUTHORIZATION DEBUG ===');
+    console.log('Required roles:', roles);
+    console.log('User profile exists:', !!req.userProfile);
+    console.log('User profile:', req.userProfile);
+    console.log('User type:', req.userProfile?.userType);
+    
     if (!req.userProfile) {
+      console.log('❌ Authorization failed: User not authenticated');
       return res.status(401).json({
         success: false,
         message: 'Access denied. User not authenticated.'
@@ -68,12 +85,16 @@ const authorize = (...roles) => {
     }
 
     if (!roles.includes(req.userProfile.userType)) {
+      console.log('❌ Authorization failed: Role mismatch');
+      console.log('User has role:', req.userProfile.userType);
+      console.log('Required roles:', roles);
       return res.status(403).json({
         success: false,
         message: `Access denied. Required role: ${roles.join(' or ')}`
       });
     }
 
+    console.log('✅ Authorization successful');
     next();
   };
 };

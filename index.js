@@ -6,6 +6,7 @@ const session = require('express-session');
 const passport = require('./config/passport');
 const authRoutes = require('./routes/authRoutes');
 const agentRoutes = require('./routes/agentRoutes');
+const propertyRoutes = require('./routes/propertyRoutes');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -48,6 +49,7 @@ mongoose.connect(mongoURI)
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentRoutes);
+app.use('/api/properties', propertyRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {
