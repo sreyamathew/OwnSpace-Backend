@@ -99,7 +99,8 @@ router.get('/', async (req, res) => {
       city, 
       state,
       bedrooms,
-      bathrooms 
+      bathrooms,
+      sortBy
     } = req.query;
 
     // Build filter object
@@ -117,10 +118,32 @@ router.get('/', async (req, res) => {
       if (maxPrice) filter.price.$lte = parseInt(maxPrice);
     }
 
+    // Build sort object
+    let sort = { createdAt: -1 }; // Default sort
+    
+    if (sortBy) {
+      switch (sortBy) {
+        case 'price-low-high':
+          sort = { price: 1 };
+          break;
+        case 'price-high-low':
+          sort = { price: -1 };
+          break;
+        case 'newest':
+          sort = { createdAt: -1 };
+          break;
+        case 'oldest':
+          sort = { createdAt: 1 };
+          break;
+        default:
+          sort = { createdAt: -1 };
+      }
+    }
+
     const properties = await Property.find(filter)
       .populate('agent', 'name email phone agentProfile')
       .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 })
+      .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit);
 
