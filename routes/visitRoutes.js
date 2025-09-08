@@ -60,13 +60,33 @@ router.put('/:id/status', protect, async (req, res) => {
 		if (!['approved', 'rejected'].includes(status)) {
 			return res.status(400).json({ success: false, message: 'Invalid status' });
 		}
-		const visit = await VisitRequest.findById(req.params.id);
+		const visit = await VisitRequest.findById(req.params.id).populate('property', 'title').populate('requester', 'name email');
 		if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
 		if (String(visit.recipient) !== String(req.user.userId)) {
 			return res.status(403).json({ success: false, message: 'Not authorized to update this request' });
 		}
 		visit.status = status;
 		await visit.save();
+
+		// Best-effort email notification to requester when status changes
+		if (status === 'rejected' || status === 'approved') {
+			try {
+				const requesterEmail = visit?.requester?.email;
+				if (requesterEmail) {
+					const subject = status === 'approved' ? 'Your Property Visit Was Approved' : 'Your Property Visit Was Cancelled';
+					const statusText = status === 'approved' ? 'approved' : 'cancelled';
+					await transporter.sendMail({
+						from: process.env.EMAIL_USER,
+						to: requesterEmail,
+						subject: subject,
+						html: `Hello ${visit?.requester?.name || ''},<br/><br/>Your visit for the property "${visit?.property?.title || 'Property'}" scheduled on ${new Date(visit.scheduledAt).toLocaleString()} has been ${statusText} by the recipient.<br/><br/>${status === 'approved' ? 'We look forward to seeing you at the scheduled time.' : 'You can request a new time from your dashboard.'}<br/><br/>Regards,<br/>OwnSpace Team`
+					});
+				}
+			} catch (mailErr) {
+				console.warn('Failed to send cancellation email:', mailErr?.message || mailErr);
+			}
+		}
+
 		res.json({ success: true, data: visit, message: `Visit ${status}` });
 	} catch (error) {
 		console.error('Update visit status error:', error);
