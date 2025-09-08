@@ -12,6 +12,7 @@ const {
   verifyOtp,
   forgotPassword,
   resetPassword,
+  changePassword,
   googleCallback,
   googleFailure
 } = require('../controllers/authController');
@@ -61,6 +62,11 @@ router.post('/forgot-password', forgotPassword);
 // @desc    Reset password with token
 // @access  Public
 router.post('/reset-password', resetPassword);
+
+// @route   POST /api/auth/change-password
+// @desc    Change password (for agents with temporary passwords)
+// @access  Private
+router.post('/change-password', protect, changePassword);
 
 // @route   GET /api/auth/google
 // @desc    Google OAuth authentication

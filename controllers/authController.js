@@ -119,6 +119,17 @@ const login = async (req, res) => {
       });
     }
 
+    // Ensure agentProfile has the new fields for agents
+    if (user.userType === 'agent' && user.agentProfile) {
+      if (user.agentProfile.tempPassword === undefined) {
+        user.agentProfile.tempPassword = false;
+      }
+      if (user.agentProfile.passwordChanged === undefined) {
+        user.agentProfile.passwordChanged = false;
+      }
+      await user.save();
+    }
+
     // Check password
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
@@ -237,7 +248,6 @@ const registerAgent = async (req, res) => {
     const { 
       name, 
       email, 
-      password, 
       phone, 
       licenseNumber, 
       agency, 
@@ -251,10 +261,10 @@ const registerAgent = async (req, res) => {
     } = req.body;
 
     // Validation
-    if (!name || !email || !password || !licenseNumber || !agency) {
+    if (!name || !email || !licenseNumber || !agency) {
       return res.status(400).json({
         success: false,
-        message: 'Please provide name, email, password, license number, and agency'
+        message: 'Please provide name, email, license number, and agency'
       });
     }
 
@@ -267,11 +277,31 @@ const registerAgent = async (req, res) => {
       });
     }
 
+    // Generate temporary password with special characters
+    const specialChars = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+    const letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const numbers = '0123456789';
+    
+    // Ensure at least one character from each category
+    let tempPassword = '';
+    tempPassword += letters[Math.floor(Math.random() * letters.length)];
+    tempPassword += numbers[Math.floor(Math.random() * numbers.length)];
+    tempPassword += specialChars[Math.floor(Math.random() * specialChars.length)];
+    
+    // Fill remaining 9 characters with random mix
+    const allChars = letters + numbers + specialChars;
+    for (let i = 0; i < 9; i++) {
+      tempPassword += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // Shuffle the password to randomize position of required characters
+    tempPassword = tempPassword.split('').sort(() => Math.random() - 0.5).join('');
+    
     // Create new agent
     const agent = new User({
       name,
       email,
-      password,
+      password: tempPassword,
       phone,
       userType: 'agent', // Set userType to agent
       address: {
@@ -287,20 +317,107 @@ const registerAgent = async (req, res) => {
         experience,
         specialization,
         bio,
-        isVerified: true // Set agents as active by default
+        isVerified: true, // Set agents as active by default
+        tempPassword: true, // Flag to indicate temporary password
+        passwordChanged: false // Track if password has been changed
       }
     });
 
     await agent.save();
+
+    // Send credentials email
+    try {
+      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
+      
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: agent.email,
+        subject: 'Welcome to OwnSpace - Your Agent Account Credentials',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8fafc;">
+            <div style="background-color: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+              <!-- Header -->
+              <div style="text-align: center; margin-bottom: 30px;">
+                <div style="background-color: #3B82F6; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                  <h1 style="margin: 0; font-size: 24px;">Welcome to OwnSpace!</h1>
+                  <p style="margin: 10px 0 0 0; opacity: 0.9;">Your agent account has been created</p>
+                </div>
+              </div>
+
+              <!-- Content -->
+              <div style="margin-bottom: 30px;">
+                <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Hello <strong>${agent.name}</strong>,
+                </p>
+                
+                <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Your agent account has been successfully created by the admin. You can now access your agent dashboard using the credentials below:
+                </p>
+
+                <!-- Credentials Box -->
+                <div style="background-color: #f3f4f6; border: 2px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                  <h3 style="color: #1f2937; margin: 0 0 15px 0; font-size: 18px;">Your Login Credentials</h3>
+                  <div style="margin-bottom: 10px;">
+                    <strong style="color: #374151;">Email:</strong> 
+                    <span style="color: #6b7280; font-family: monospace; background-color: #e5e7eb; padding: 2px 6px; border-radius: 4px; margin-left: 8px;">${agent.email}</span>
+                  </div>
+                  <div>
+                    <strong style="color: #374151;">Temporary Password:</strong> 
+                    <span style="color: #6b7280; font-family: monospace; background-color: #e5e7eb; padding: 2px 6px; border-radius: 4px; margin-left: 8px;">${tempPassword}</span>
+                  </div>
+                </div>
+
+                <div style="background-color: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 15px; margin: 20px 0;">
+                  <p style="color: #92400e; margin: 0; font-size: 14px;">
+                    <strong>Important:</strong> This is a temporary password. You will be required to change it on your first login for security reasons.
+                  </p>
+                </div>
+
+                <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Click the button below to access your agent dashboard:
+                </p>
+
+                <!-- Login Button -->
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="${loginUrl}" style="background-color: #3B82F6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: 600; font-size: 16px;">
+                    Access Agent Dashboard
+                  </a>
+                </div>
+
+                <p style="color: #6b7280; font-size: 14px; line-height: 1.6;">
+                  If the button doesn't work, copy and paste this link into your browser:<br>
+                  <span style="word-break: break-all; color: #3B82F6;">${loginUrl}</span>
+                </p>
+              </div>
+
+              <!-- Footer -->
+              <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 30px;">
+                <p style="color: #6b7280; font-size: 12px; margin: 0; text-align: center;">
+                  This is an automated email from OwnSpace. Please do not reply to this email.<br>
+                  If you have any questions, please contact your admin or support team.
+                </p>
+              </div>
+            </div>
+          </div>
+        `
+      });
+
+      console.log('Agent credentials email sent successfully to:', agent.email);
+
+    } catch (emailError) {
+      console.error('Email sending error:', emailError);
+      // Don't fail the registration if email fails, but log it
+    }
 
     // Get agent profile without password
     const agentProfile = agent.getPublicProfile();
 
     res.status(201).json({
       success: true,
-      message: 'Agent registered successfully',
+      message: 'Agent registered successfully. Login credentials have been sent to their email.',
       data: {
-        agent: agentProfile
+        agent: agentProfile,
+        credentialsSent: true
       }
     });
 
@@ -564,6 +681,65 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// @desc    Change password (for agents with temporary passwords)
+// @route   POST /api/auth/change-password
+// @access  Private
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.userId;
+
+    // Validation
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide current password and new password'
+      });
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await user.comparePassword(currentPassword);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    
+    // If this was a temporary password, mark it as changed
+    if (user.agentProfile && user.agentProfile.tempPassword) {
+      user.agentProfile.tempPassword = false;
+      user.agentProfile.passwordChanged = true;
+    }
+    
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during password change'
+    });
+  }
+};
+
 // @desc    Google OAuth callback
 // @route   GET /api/auth/google/callback
 // @access  Public
@@ -607,6 +783,7 @@ module.exports = {
   verifyOtp,
   forgotPassword,
   resetPassword,
+  changePassword,
   googleCallback,
   googleFailure
 };
