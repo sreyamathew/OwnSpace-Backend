@@ -91,6 +91,40 @@ router.get('/google/callback',
 // @access  Public
 router.get('/google/failure', googleFailure);
 
+// Saved properties endpoints (unlimited)
+router.get('/saved', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).populate('savedProperties');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, data: user.savedProperties || [] });
+  } catch (e) { res.status(500).json({ success: false, message: 'Failed to fetch saved properties' }); }
+});
+
+router.post('/saved/:propertyId', protect, async (req, res) => {
+  try {
+    const { propertyId } = req.params;
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const exists = (user.savedProperties || []).some(id => String(id) === String(propertyId));
+    if (!exists) {
+      user.savedProperties = [...(user.savedProperties || []), propertyId];
+      await user.save();
+    }
+    res.status(201).json({ success: true, message: 'Saved', data: user.savedProperties });
+  } catch (e) { res.status(500).json({ success: false, message: 'Failed to save property' }); }
+});
+
+router.delete('/saved/:propertyId', protect, async (req, res) => {
+  try {
+    const { propertyId } = req.params;
+    const user = await User.findById(req.user.userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    user.savedProperties = (user.savedProperties || []).filter(id => String(id) !== String(propertyId));
+    await user.save();
+    res.json({ success: true, message: 'Removed', data: user.savedProperties });
+  } catch (e) { res.status(500).json({ success: false, message: 'Failed to remove saved property' }); }
+});
+
 // @route   POST /api/auth/make-admin
 // @desc    Make current user admin (for testing purposes)
 // @access  Private

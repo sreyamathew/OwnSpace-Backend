@@ -139,6 +139,17 @@ const login = async (req, res) => {
       });
     }
 
+    // Enforce agent status: only active (verified) agents can log in
+    if (user.userType === 'agent') {
+      const isActiveAgent = user?.agentProfile?.isVerified === true;
+      if (!isActiveAgent) {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account is inactive, please contact admin'
+        });
+      }
+    }
+
     // Update last login
     user.lastLogin = new Date();
     await user.save();
