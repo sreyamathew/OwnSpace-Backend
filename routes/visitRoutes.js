@@ -4,7 +4,24 @@ const VisitRequest = require('../models/VisitRequest');
 const Property = require('../models/Property');
 const User = require('../models/User');
 const transporter = require('../utils/mailer');
-const { protect } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
+const VisitSlot = require('../models/VisitSlot');
+const UnavailableDate = require('../models/UnavailableDate');
+
+// Helpers
+const toYMD = (d) => {
+	const dt = new Date(d);
+	return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+};
+const toHM = (d) => {
+	const dt = new Date(d);
+	return `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+};
+const addDays = (d, n) => {
+	const dt = new Date(d);
+	dt.setDate(dt.getDate()+n);
+	return dt;
+};
 
 // Create a visit request
 router.post('/', protect, async (req, res) => {
@@ -19,6 +36,26 @@ router.post('/', protect, async (req, res) => {
 			return res.status(404).json({ success: false, message: 'Property not found' });
 		}
 
+		// Validate against available slots and blackout dates
+		const ymd = toYMD(scheduledAt);
+		const hm = toHM(scheduledAt);
+		const today = toYMD(new Date());
+		const maxDate = toYMD(addDays(new Date(), 30));
+
+		if (ymd < today || ymd > maxDate) {
+			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
+		}
+
+		const isUnavailable = await UnavailableDate.findOne({ property: property._id, date: ymd });
+		if (isUnavailable) {
+			return res.status(400).json({ success: false, message: 'Selected date is unavailable' });
+		}
+
+		const slot = await VisitSlot.findOne({ property: property._id, date: ymd, startTime: hm, isBooked: false });
+		if (!slot) {
+			return res.status(400).json({ success: false, message: 'Selected time slot is not available' });
+		}
+
 		// Choose recipient: agent if exists, else createdBy
 		const recipientUser = property.agent || property.createdBy;
 		const requesterUserId = req.user.userId;
@@ -30,6 +67,11 @@ router.post('/', protect, async (req, res) => {
 			scheduledAt: new Date(scheduledAt),
 			note: note || ''
 		});
+
+		// Mark slot as booked
+		slot.isBooked = true;
+		slot.bookedByVisitId = visit._id;
+		await slot.save();
 
 		// Notify recipient by email (best-effort)
 		try {
@@ -50,6 +92,120 @@ router.post('/', protect, async (req, res) => {
 	} catch (error) {
 		console.error('Create visit request error:', error);
 		res.status(500).json({ success: false, message: 'Failed to create visit request' });
+	}
+});
+
+// Manage slots (agent/admin)
+router.post('/slots', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const { propertyId, date, times } = req.body; // times: array of HH:mm starts
+		if (!propertyId || !date || !Array.isArray(times)) {
+			return res.status(400).json({ success: false, message: 'propertyId, date, and times[] are required' });
+		}
+		const property = await Property.findById(propertyId);
+		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+
+		const today = toYMD(new Date());
+		const maxDate = toYMD(addDays(new Date(), 30));
+		if (date < today || date > maxDate) {
+			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
+		}
+
+		const created = [];
+		for (const start of times) {
+			const [h, m] = start.split(':').map(Number);
+			const endH = m + 30 >= 60 ? h + 1 : h;
+			const endM = (m + 30) % 60;
+			const end = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
+			try {
+				const slot = await VisitSlot.create({ property: property._id, date, startTime: start, endTime: end, createdBy: req.user.userId });
+				created.push(slot);
+			} catch (e) {
+				// ignore duplicates
+			}
+		}
+		res.status(201).json({ success: true, data: created });
+	} catch (e) {
+		console.error('Create slots error:', e);
+		res.status(500).json({ success: false, message: 'Failed to create slots' });
+	}
+});
+
+router.delete('/slots/:slotId', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const slot = await VisitSlot.findById(req.params.slotId);
+		if (!slot) return res.status(404).json({ success: false, message: 'Slot not found' });
+		if (slot.isBooked) return res.status(400).json({ success: false, message: 'Cannot delete a booked slot' });
+		await slot.deleteOne();
+		res.json({ success: true, message: 'Slot deleted' });
+	} catch (e) {
+		res.status(500).json({ success: false, message: 'Failed to delete slot' });
+	}
+});
+
+// Manage unavailable dates (agent/admin)
+router.post('/unavailable', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const { propertyId, date } = req.body;
+		if (!propertyId || !date) return res.status(400).json({ success: false, message: 'propertyId and date are required' });
+		const property = await Property.findById(propertyId);
+		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+		const today = toYMD(new Date());
+		const maxDate = toYMD(addDays(new Date(), 30));
+		if (date < today || date > maxDate) {
+			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
+		}
+		const item = await UnavailableDate.findOneAndUpdate(
+			{ property: property._id, date },
+			{ property: property._id, date, createdBy: req.user.userId },
+			{ new: true, upsert: true }
+		);
+		// Also remove any unbooked slots for that date
+		await VisitSlot.deleteMany({ property: property._id, date, isBooked: false });
+		res.status(201).json({ success: true, data: item });
+	} catch (e) {
+		console.error('Mark unavailable error:', e);
+		res.status(500).json({ success: false, message: 'Failed to mark date unavailable' });
+	}
+});
+
+router.delete('/unavailable', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const { propertyId, date } = req.body;
+		if (!propertyId || !date) return res.status(400).json({ success: false, message: 'propertyId and date are required' });
+		await UnavailableDate.deleteOne({ property: propertyId, date });
+		res.json({ success: true, message: 'Unavailable date removed' });
+	} catch (e) {
+		res.status(500).json({ success: false, message: 'Failed to remove unavailable date' });
+	}
+});
+
+// Public availability for buyers
+router.get('/availability/:propertyId', async (req, res) => {
+	try {
+		const { propertyId } = req.params;
+		const property = await Property.findById(propertyId);
+		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+		const start = toYMD(new Date());
+		const end = toYMD(addDays(new Date(), 30));
+
+		const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
+		const blackoutSet = new Set(blackout.map(b => b.date));
+		const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false })
+			.sort({ date: 1, startTime: 1 });
+
+		// Group by date and exclude blackout dates
+		const byDate = {};
+		for (const s of slots) {
+			if (blackoutSet.has(s.date)) continue;
+			if (!byDate[s.date]) byDate[s.date] = [];
+			byDate[s.date].push({ slotId: s._id, startTime: s.startTime, endTime: s.endTime });
+		}
+		const availableDates = Object.keys(byDate);
+		res.json({ success: true, data: { availableDates, slotsByDate: byDate } });
+	} catch (e) {
+		console.error('Fetch availability error:', e);
+		res.status(500).json({ success: false, message: 'Failed to fetch availability' });
 	}
 });
 
