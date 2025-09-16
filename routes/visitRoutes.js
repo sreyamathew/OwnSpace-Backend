@@ -68,6 +68,8 @@ router.post('/', protect, async (req, res) => {
 			note: note || ''
 		});
 
+		// Note: Frontend records 'visit_requested' in local history; approval will be reflected via status change endpoints
+
 		// Mark slot as booked
 		slot.isBooked = true;
 		slot.bookedByVisitId = visit._id;
