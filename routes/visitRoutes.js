@@ -36,9 +36,16 @@ router.post('/', protect, async (req, res) => {
 			return res.status(404).json({ success: false, message: 'Property not found' });
 		}
 
+		// Reject any scheduling in the past or present (server time)
+		const scheduled = new Date(scheduledAt);
+		const now = new Date();
+		if (scheduled.getTime() <= now.getTime()) {
+			return res.status(400).json({ success: false, message: 'Cannot schedule a visit in the past or present. Please select a future time.' });
+		}
+
 		// Validate against available slots and blackout dates
-		const ymd = toYMD(scheduledAt);
-		const hm = toHM(scheduledAt);
+		const ymd = toYMD(scheduled);
+		const hm = toHM(scheduled);
 		const today = toYMD(new Date());
 		const maxDate = toYMD(addDays(new Date(), 30));
 
@@ -56,6 +63,16 @@ router.post('/', protect, async (req, res) => {
 			return res.status(400).json({ success: false, message: 'Selected time slot is not available' });
 		}
 
+		// Extra guard: if slot is today, ensure its startTime is still in the future vs server time
+		if (ymd === today) {
+			const [sh, sm] = slot.startTime.split(':').map(Number);
+			const slotDate = new Date();
+			slotDate.setHours(sh, sm, 0, 0);
+			if (slotDate.getTime() <= now.getTime()) {
+				return res.status(400).json({ success: false, message: 'Selected time slot has already passed' });
+			}
+		}
+
 		// Choose recipient: agent if exists, else createdBy
 		const recipientUser = property.agent || property.createdBy;
 		const requesterUserId = req.user.userId;
@@ -64,7 +81,7 @@ router.post('/', protect, async (req, res) => {
 			property: property._id,
 			requester: requesterUserId,
 			recipient: recipientUser,
-			scheduledAt: new Date(scheduledAt),
+			scheduledAt: scheduled,
 			note: note || ''
 		});
 
@@ -107,26 +124,54 @@ router.post('/slots', protect, authorize('agent', 'admin'), async (req, res) => 
 		const property = await Property.findById(propertyId);
 		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
 
-		const today = toYMD(new Date());
-		const maxDate = toYMD(addDays(new Date(), 30));
+		const now = new Date();
+		const today = toYMD(now);
+		const maxDate = toYMD(addDays(now, 30));
+		
+		// Validate date is not in the past and within 30 days
 		if (date < today || date > maxDate) {
 			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
 		}
 
 		const created = [];
+		const skipped = [];
+		
 		for (const start of times) {
 			const [h, m] = start.split(':').map(Number);
 			const endH = m + 30 >= 60 ? h + 1 : h;
 			const endM = (m + 30) % 60;
 			const end = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
+			
+			// For today's slots, validate they are at least 10 minutes in the future
+			if (date === today) {
+				const slotTime = new Date(now);
+				slotTime.setHours(h, m, 0, 0);
+				
+				// Create a buffer time (current time + 10 minutes)
+				const bufferTime = new Date(now);
+				bufferTime.setMinutes(bufferTime.getMinutes() + 10);
+				
+				// Skip if slot time is not at least 10 minutes in the future
+				if (slotTime <= bufferTime) {
+					skipped.push({ time: start, reason: 'Time must be at least 10 minutes in the future' });
+					continue;
+				}
+			}
+			
 			try {
 				const slot = await VisitSlot.create({ property: property._id, date, startTime: start, endTime: end, createdBy: req.user.userId });
 				created.push(slot);
 			} catch (e) {
 				// ignore duplicates
+				skipped.push({ time: start, reason: 'Duplicate slot' });
 			}
 		}
-		res.status(201).json({ success: true, data: created });
+		res.status(201).json({ 
+			success: true, 
+			data: created,
+			skipped: skipped.length > 0 ? skipped : undefined,
+			message: skipped.length > 0 ? `Created ${created.length} slots. Skipped ${skipped.length} invalid slots.` : `Created ${created.length} slots.`
+		});
 	} catch (e) {
 		console.error('Create slots error:', e);
 		res.status(500).json({ success: false, message: 'Failed to create slots' });
