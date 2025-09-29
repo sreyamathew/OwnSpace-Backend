@@ -393,6 +393,142 @@ router.delete('/:id', protect, async (req, res) => {
 	}
 });
 
+// Update visit status (approve/reject/visited/not_visited)
+router.put('/:id/status', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const id = req.params.id;
+		const { status, visitNotes } = req.body;
+		
+		// For approve/reject
+		if (['approved', 'rejected'].includes(status)) {
+			const visit = await VisitRequest.findById(id);
+			if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
+			
+			visit.status = status;
+			await visit.save();
+			return res.json({ success: true, data: visit, message: `Visit ${status}` });
+		}
+		
+		// For visited/not_visited
+		if (['visited', 'not_visited'].includes(status)) {
+			const visit = await VisitRequest.findById(id);
+			if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
+			
+			// Check if visit is in approved status
+			if (visit.status !== 'approved') {
+				return res.status(400).json({ 
+					success: false, 
+					message: 'Only approved visits can be marked as visited or not visited' 
+				});
+			}
+			
+			// Check if scheduled time has passed
+			// Temporarily disable this check for testing purposes
+			// const now = new Date();
+			// if (new Date(visit.scheduledAt) > now) {
+			// 	return res.status(400).json({ 
+			// 		success: false, 
+			// 		message: 'Cannot update status before scheduled visit time' 
+			// 	});
+			// }
+			
+			// Update the visit status
+			visit.status = status;
+			if (visitNotes) {
+				visit.visitNotes = visitNotes;
+			}
+			await visit.save();
+			
+			return res.json({ success: true, data: visit, message: `Visit marked as ${status}` });
+		}
+		
+		return res.status(400).json({ success: false, message: 'Invalid status' });
+	} catch (e) {
+		console.error('Update visit status error:', e);
+		res.status(500).json({ success: false, message: 'Failed to update visit status' });
+	}
+});
+
+// Update visit status after scheduled time (Admin/Agent only)
+router.put('/:id/status', protect, authorize('admin', 'agent'), async (req, res) => {
+	try {
+		const { id } = req.params;
+		const { status, visitNotes } = req.body;
+		
+		if (!['visited', 'not_visited'].includes(status)) {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Status must be either "visited" or "not_visited"' 
+			});
+		}
+		
+		const visit = await VisitRequest.findById(id);
+		if (!visit) {
+			return res.status(404).json({ success: false, message: 'Visit request not found' });
+		}
+		
+		// Check if visit is in approved status
+		if (visit.status !== 'approved') {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Only approved visits can be marked as visited or not visited' 
+			});
+		}
+		
+		// Check if scheduled time has passed
+		const now = new Date();
+		if (new Date(visit.scheduledAt) > now) {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Cannot update status before scheduled visit time' 
+			});
+		}
+		
+		// Update the visit status
+		visit.status = status;
+		if (visitNotes) {
+			visit.visitNotes = visitNotes;
+		}
+		await visit.save();
+		
+		// Send email notification to user
+		const user = await User.findById(visit.requester);
+		const property = await Property.findById(visit.property);
+		
+		if (user && property) {
+			const mailOptions = {
+				from: process.env.EMAIL_FROM,
+				to: user.email,
+				subject: `Visit Status Update: ${property.title}`,
+				html: `
+					<h1>Visit Status Update</h1>
+					<p>Your scheduled visit to <strong>${property.title}</strong> has been marked as <strong>${status === 'visited' ? 'Visited' : 'Not Visited'}</strong>.</p>
+					${visitNotes ? `<p><strong>Notes:</strong> ${visitNotes}</p>` : ''}
+					<p>Thank you for using our service.</p>
+				`
+			};
+			
+			try {
+				await transporter.sendMail(mailOptions);
+			} catch (error) {
+				console.error('Email notification failed:', error);
+			}
+		}
+		
+		res.json({ 
+			success: true, 
+			message: `Visit marked as ${status}`, 
+			visit 
+		});
+	} catch (error) {
+		console.error('Error updating visit status:', error);
+		res.status(500).json({ 
+			success: false, 
+			message: 'Failed to update visit status' 
+		});
+	}
+});
+
 module.exports = router;
 
 

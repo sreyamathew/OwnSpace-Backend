@@ -5,8 +5,9 @@ const visitRequestSchema = new mongoose.Schema({
 	requester: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 	recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 	scheduledAt: { type: Date, required: true },
-	status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+	status: { type: String, enum: ['pending', 'approved', 'rejected', 'visited', 'not_visited'], default: 'pending' },
 	note: { type: String },
+	visitNotes: { type: String }, // Optional notes about the visit outcome
 }, { timestamps: true });
 
 visitRequestSchema.index({ recipient: 1, status: 1, scheduledAt: 1 });
