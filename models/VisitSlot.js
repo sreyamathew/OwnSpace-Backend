@@ -8,6 +8,7 @@ const visitSlotSchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   isBooked: { type: Boolean, default: false, index: true },
   bookedByVisitId: { type: mongoose.Schema.Types.ObjectId, ref: 'VisitRequest' },
+  isExpired: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 
 visitSlotSchema.index({ property: 1, date: 1, startTime: 1 }, { unique: true });

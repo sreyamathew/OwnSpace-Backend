@@ -229,31 +229,40 @@ router.delete('/unavailable', protect, authorize('agent', 'admin'), async (req, 
 
 // Public availability for buyers
 router.get('/availability/:propertyId', async (req, res) => {
-	try {
-		const { propertyId } = req.params;
-		const property = await Property.findById(propertyId);
-		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
-		const start = toYMD(new Date());
-		const end = toYMD(addDays(new Date(), 30));
+  try {
+    const { propertyId } = req.params;
+    const property = await Property.findById(propertyId);
+    if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+    const now = new Date();
+    const start = toYMD(now);
+    const end = toYMD(addDays(now, 30));
 
-		const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
-		const blackoutSet = new Set(blackout.map(b => b.date));
-		const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false })
-			.sort({ date: 1, startTime: 1 });
+    const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
+    const blackoutSet = new Set(blackout.map(b => b.date));
+    const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false, isExpired: false })
+      .sort({ date: 1, startTime: 1 });
 
-		// Group by date and exclude blackout dates
-		const byDate = {};
-		for (const s of slots) {
-			if (blackoutSet.has(s.date)) continue;
-			if (!byDate[s.date]) byDate[s.date] = [];
-			byDate[s.date].push({ slotId: s._id, startTime: s.startTime, endTime: s.endTime });
-		}
-		const availableDates = Object.keys(byDate);
-		res.json({ success: true, data: { availableDates, slotsByDate: byDate } });
-	} catch (e) {
-		console.error('Fetch availability error:', e);
-		res.status(500).json({ success: false, message: 'Failed to fetch availability' });
-	}
+    // Group by date and exclude blackout dates
+    const byDate = {};
+    for (const s of slots) {
+      if (blackoutSet.has(s.date)) continue;
+      // Exclude any slot whose start time has already passed (server time)
+      if (s.date === start) {
+        try {
+          const slotStart = new Date(`${s.date}T${s.startTime}:00`);
+          if (slotStart.getTime() <= now.getTime()) continue;
+        } catch (_) { /* ignore parse errors */ }
+      }
+      if (!byDate[s.date]) byDate[s.date] = [];
+      byDate[s.date].push({ slotId: s._id, startTime: s.startTime, endTime: s.endTime });
+    }
+    // Only include dates that still have available slots
+    const availableDates = Object.keys(byDate).filter(d => (byDate[d]?.length || 0) > 0);
+    res.json({ success: true, data: { availableDates, slotsByDate: byDate } });
+  } catch (e) {
+    console.error('Fetch availability error:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch availability' });
+  }
 });
 
 // Approve or reject a visit request (recipient only)
