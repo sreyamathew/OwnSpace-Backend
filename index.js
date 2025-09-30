@@ -8,7 +8,6 @@ const authRoutes = require('./routes/authRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const visitRoutes = require('./routes/visitRoutes');
-const VisitSlot = require('./models/VisitSlot');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -84,34 +83,4 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`🚀 Server is running on port ${port}`);
   console.log(`📱 API Health Check: http://localhost:${port}/api/health`);
-  
-  // Scheduled cleanup: mark expired, unbooked slots as expired every 3 minutes
-  const markExpiredSlots = async () => {
-    try {
-      const now = new Date();
-      // Fetch candidate slots that are not yet expired and not booked
-      const candidates = await VisitSlot.find({ isExpired: false, isBooked: false });
-      const toExpireIds = [];
-      for (const s of candidates) {
-        try {
-          const endDt = new Date(`${s.date}T${s.endTime}:00`);
-          if (endDt.getTime() <= now.getTime()) {
-            toExpireIds.push(s._id);
-          }
-        } catch (e) {
-          // ignore parse errors
-        }
-      }
-      if (toExpireIds.length > 0) {
-        await VisitSlot.updateMany({ _id: { $in: toExpireIds } }, { $set: { isExpired: true } });
-        console.log(`⏱️ Marked ${toExpireIds.length} slots as expired`);
-      }
-    } catch (err) {
-      console.error('Expired slots cleanup error:', err.message);
-    }
-  };
-
-  // Run immediately and then on interval
-  markExpiredSlots();
-  setInterval(markExpiredSlots, 3 * 60 * 1000);
 });

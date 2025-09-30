@@ -36,11 +36,11 @@ router.post('/', protect, async (req, res) => {
 			return res.status(404).json({ success: false, message: 'Property not found' });
 		}
 
-		// Reject any scheduling in the past or present (server time)
+		// Reject any scheduling in the past (server time)
 		const scheduled = new Date(scheduledAt);
 		const now = new Date();
 		if (scheduled.getTime() <= now.getTime()) {
-			return res.status(400).json({ success: false, message: 'Cannot schedule a visit in the past or present. Please select a future time.' });
+			return res.status(400).json({ success: false, message: 'Cannot schedule a visit in the past' });
 		}
 
 		// Validate against available slots and blackout dates
@@ -124,54 +124,26 @@ router.post('/slots', protect, authorize('agent', 'admin'), async (req, res) => 
 		const property = await Property.findById(propertyId);
 		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
 
-		const now = new Date();
-		const today = toYMD(now);
-		const maxDate = toYMD(addDays(now, 30));
-		
-		// Validate date is not in the past and within 30 days
+		const today = toYMD(new Date());
+		const maxDate = toYMD(addDays(new Date(), 30));
 		if (date < today || date > maxDate) {
 			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
 		}
 
 		const created = [];
-		const skipped = [];
-		
 		for (const start of times) {
 			const [h, m] = start.split(':').map(Number);
 			const endH = m + 30 >= 60 ? h + 1 : h;
 			const endM = (m + 30) % 60;
 			const end = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
-			
-			// For today's slots, validate they are at least 10 minutes in the future
-			if (date === today) {
-				const slotTime = new Date(now);
-				slotTime.setHours(h, m, 0, 0);
-				
-				// Create a buffer time (current time + 10 minutes)
-				const bufferTime = new Date(now);
-				bufferTime.setMinutes(bufferTime.getMinutes() + 10);
-				
-				// Skip if slot time is not at least 10 minutes in the future
-				if (slotTime <= bufferTime) {
-					skipped.push({ time: start, reason: 'Time must be at least 10 minutes in the future' });
-					continue;
-				}
-			}
-			
 			try {
 				const slot = await VisitSlot.create({ property: property._id, date, startTime: start, endTime: end, createdBy: req.user.userId });
 				created.push(slot);
 			} catch (e) {
 				// ignore duplicates
-				skipped.push({ time: start, reason: 'Duplicate slot' });
 			}
 		}
-		res.status(201).json({ 
-			success: true, 
-			data: created,
-			skipped: skipped.length > 0 ? skipped : undefined,
-			message: skipped.length > 0 ? `Created ${created.length} slots. Skipped ${skipped.length} invalid slots.` : `Created ${created.length} slots.`
-		});
+		res.status(201).json({ success: true, data: created });
 	} catch (e) {
 		console.error('Create slots error:', e);
 		res.status(500).json({ success: false, message: 'Failed to create slots' });
@@ -229,40 +201,31 @@ router.delete('/unavailable', protect, authorize('agent', 'admin'), async (req, 
 
 // Public availability for buyers
 router.get('/availability/:propertyId', async (req, res) => {
-  try {
-    const { propertyId } = req.params;
-    const property = await Property.findById(propertyId);
-    if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
-    const now = new Date();
-    const start = toYMD(now);
-    const end = toYMD(addDays(now, 30));
+	try {
+		const { propertyId } = req.params;
+		const property = await Property.findById(propertyId);
+		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+		const start = toYMD(new Date());
+		const end = toYMD(addDays(new Date(), 30));
 
-    const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
-    const blackoutSet = new Set(blackout.map(b => b.date));
-    const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false, isExpired: false })
-      .sort({ date: 1, startTime: 1 });
+		const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
+		const blackoutSet = new Set(blackout.map(b => b.date));
+		const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false })
+			.sort({ date: 1, startTime: 1 });
 
-    // Group by date and exclude blackout dates
-    const byDate = {};
-    for (const s of slots) {
-      if (blackoutSet.has(s.date)) continue;
-      // Exclude any slot whose start time has already passed (server time)
-      if (s.date === start) {
-        try {
-          const slotStart = new Date(`${s.date}T${s.startTime}:00`);
-          if (slotStart.getTime() <= now.getTime()) continue;
-        } catch (_) { /* ignore parse errors */ }
-      }
-      if (!byDate[s.date]) byDate[s.date] = [];
-      byDate[s.date].push({ slotId: s._id, startTime: s.startTime, endTime: s.endTime });
-    }
-    // Only include dates that still have available slots
-    const availableDates = Object.keys(byDate).filter(d => (byDate[d]?.length || 0) > 0);
-    res.json({ success: true, data: { availableDates, slotsByDate: byDate } });
-  } catch (e) {
-    console.error('Fetch availability error:', e);
-    res.status(500).json({ success: false, message: 'Failed to fetch availability' });
-  }
+		// Group by date and exclude blackout dates
+		const byDate = {};
+		for (const s of slots) {
+			if (blackoutSet.has(s.date)) continue;
+			if (!byDate[s.date]) byDate[s.date] = [];
+			byDate[s.date].push({ slotId: s._id, startTime: s.startTime, endTime: s.endTime });
+		}
+		const availableDates = Object.keys(byDate);
+		res.json({ success: true, data: { availableDates, slotsByDate: byDate } });
+	} catch (e) {
+		console.error('Fetch availability error:', e);
+		res.status(500).json({ success: false, message: 'Failed to fetch availability' });
+	}
 });
 
 // Approve or reject a visit request (recipient only)
@@ -300,6 +263,65 @@ router.put('/:id/status', protect, async (req, res) => {
 		}
 
 		res.json({ success: true, data: visit, message: `Visit ${status}` });
+	} catch (error) {
+		console.error('Update visit status error:', error);
+		res.status(500).json({ success: false, message: 'Failed to update visit status' });
+	}
+});
+
+// Update visit status to visited or not visited (Admin/Agent only)
+router.put('/:id/visit-status', protect, authorize('agent', 'admin'), async (req, res) => {
+	try {
+		const { status } = req.body;
+		if (!['visited', 'not visited'].includes(status)) {
+			return res.status(400).json({ success: false, message: 'Invalid status. Must be "visited" or "not visited"' });
+		}
+		
+		const visit = await VisitRequest.findById(req.params.id).populate('property', 'title');
+		if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
+		
+		// Check if the user is the recipient of the visit request
+		if (String(visit.recipient) !== String(req.user.userId)) {
+			return res.status(403).json({ success: false, message: 'Not authorized to update this request' });
+		}
+		
+		// Check if the scheduled time has passed
+		const now = new Date();
+		if (new Date(visit.scheduledAt) > now) {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Cannot update visit status before the scheduled time' 
+			});
+		}
+		
+		// Check if the visit was approved (can only mark visited/not visited for approved visits)
+		if (visit.status !== 'approved') {
+			return res.status(400).json({ 
+				success: false, 
+				message: 'Only approved visits can be marked as visited or not visited' 
+			});
+		}
+		
+		visit.status = status;
+		await visit.save();
+		
+		// Best-effort email notification to requester
+		try {
+			const requester = await User.findById(visit.requester);
+			if (requester?.email) {
+				const statusText = status === 'visited' ? 'completed' : 'marked as not attended';
+				await transporter.sendMail({
+					from: process.env.EMAIL_USER,
+					to: requester.email,
+					subject: `Your Property Visit Status Updated`,
+					html: `Hello ${requester.name || ''},<br/><br/>Your visit for the property "${visit?.property?.title || 'Property'}" scheduled on ${new Date(visit.scheduledAt).toLocaleString()} has been ${statusText}.<br/><br/>Thank you for using our service.`
+				});
+			}
+		} catch (mailErr) {
+			console.warn('Failed to send status update email:', mailErr?.message || mailErr);
+		}
+		
+		res.json({ success: true, data: visit, message: `Visit marked as ${status}` });
 	} catch (error) {
 		console.error('Update visit status error:', error);
 		res.status(500).json({ success: false, message: 'Failed to update visit status' });
@@ -390,142 +412,6 @@ router.delete('/:id', protect, async (req, res) => {
 		res.json({ success: true, message: 'Visit cancelled' });
 	} catch (e) {
 		res.status(500).json({ success: false, message: 'Failed to cancel visit' });
-	}
-});
-
-// Update visit status (approve/reject/visited/not_visited)
-router.put('/:id/status', protect, authorize('agent', 'admin'), async (req, res) => {
-	try {
-		const id = req.params.id;
-		const { status, visitNotes } = req.body;
-		
-		// For approve/reject
-		if (['approved', 'rejected'].includes(status)) {
-			const visit = await VisitRequest.findById(id);
-			if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
-			
-			visit.status = status;
-			await visit.save();
-			return res.json({ success: true, data: visit, message: `Visit ${status}` });
-		}
-		
-		// For visited/not_visited
-		if (['visited', 'not_visited'].includes(status)) {
-			const visit = await VisitRequest.findById(id);
-			if (!visit) return res.status(404).json({ success: false, message: 'Visit request not found' });
-			
-			// Check if visit is in approved status
-			if (visit.status !== 'approved') {
-				return res.status(400).json({ 
-					success: false, 
-					message: 'Only approved visits can be marked as visited or not visited' 
-				});
-			}
-			
-			// Check if scheduled time has passed
-			// Temporarily disable this check for testing purposes
-			// const now = new Date();
-			// if (new Date(visit.scheduledAt) > now) {
-			// 	return res.status(400).json({ 
-			// 		success: false, 
-			// 		message: 'Cannot update status before scheduled visit time' 
-			// 	});
-			// }
-			
-			// Update the visit status
-			visit.status = status;
-			if (visitNotes) {
-				visit.visitNotes = visitNotes;
-			}
-			await visit.save();
-			
-			return res.json({ success: true, data: visit, message: `Visit marked as ${status}` });
-		}
-		
-		return res.status(400).json({ success: false, message: 'Invalid status' });
-	} catch (e) {
-		console.error('Update visit status error:', e);
-		res.status(500).json({ success: false, message: 'Failed to update visit status' });
-	}
-});
-
-// Update visit status after scheduled time (Admin/Agent only)
-router.put('/:id/status', protect, authorize('admin', 'agent'), async (req, res) => {
-	try {
-		const { id } = req.params;
-		const { status, visitNotes } = req.body;
-		
-		if (!['visited', 'not_visited'].includes(status)) {
-			return res.status(400).json({ 
-				success: false, 
-				message: 'Status must be either "visited" or "not_visited"' 
-			});
-		}
-		
-		const visit = await VisitRequest.findById(id);
-		if (!visit) {
-			return res.status(404).json({ success: false, message: 'Visit request not found' });
-		}
-		
-		// Check if visit is in approved status
-		if (visit.status !== 'approved') {
-			return res.status(400).json({ 
-				success: false, 
-				message: 'Only approved visits can be marked as visited or not visited' 
-			});
-		}
-		
-		// Check if scheduled time has passed
-		const now = new Date();
-		if (new Date(visit.scheduledAt) > now) {
-			return res.status(400).json({ 
-				success: false, 
-				message: 'Cannot update status before scheduled visit time' 
-			});
-		}
-		
-		// Update the visit status
-		visit.status = status;
-		if (visitNotes) {
-			visit.visitNotes = visitNotes;
-		}
-		await visit.save();
-		
-		// Send email notification to user
-		const user = await User.findById(visit.requester);
-		const property = await Property.findById(visit.property);
-		
-		if (user && property) {
-			const mailOptions = {
-				from: process.env.EMAIL_FROM,
-				to: user.email,
-				subject: `Visit Status Update: ${property.title}`,
-				html: `
-					<h1>Visit Status Update</h1>
-					<p>Your scheduled visit to <strong>${property.title}</strong> has been marked as <strong>${status === 'visited' ? 'Visited' : 'Not Visited'}</strong>.</p>
-					${visitNotes ? `<p><strong>Notes:</strong> ${visitNotes}</p>` : ''}
-					<p>Thank you for using our service.</p>
-				`
-			};
-			
-			try {
-				await transporter.sendMail(mailOptions);
-			} catch (error) {
-				console.error('Email notification failed:', error);
-			}
-		}
-		
-		res.json({ 
-			success: true, 
-			message: `Visit marked as ${status}`, 
-			visit 
-		});
-	} catch (error) {
-		console.error('Error updating visit status:', error);
-		res.status(500).json({ 
-			success: false, 
-			message: 'Failed to update visit status' 
-		});
 	}
 });
 
