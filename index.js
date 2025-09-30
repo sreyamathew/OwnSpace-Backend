@@ -47,6 +47,38 @@ mongoose.connect(mongoURI)
     process.exit(1);
   });
 
+// Automatic cleanup for expired visit slots
+const VisitSlot = require('./models/VisitSlot');
+
+// Function to clean up expired slots
+const cleanupExpiredSlots = async () => {
+  try {
+    const now = new Date();
+    const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTime = `${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`;
+    
+    // Find and remove expired slots (past dates or today with time in the past)
+    const result = await VisitSlot.deleteMany({
+      $or: [
+        { date: { $lt: currentDate } }, // Past dates
+        { date: currentDate, startTime: { $lt: currentTime } } // Today but past time
+      ]
+    });
+    
+    console.log(`🧹 Cleaned up ${result.deletedCount} expired visit slots`);
+  } catch (error) {
+    console.error('Error cleaning up expired slots:', error);
+  }
+};
+
+// Run cleanup on startup
+cleanupExpiredSlots();
+
+// Schedule cleanup to run every 10 minutes
+setInterval(cleanupExpiredSlots, 10 * 60 * 1000);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentRoutes);

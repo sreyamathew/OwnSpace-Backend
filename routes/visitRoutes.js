@@ -124,15 +124,35 @@ router.post('/slots', protect, authorize('agent', 'admin'), async (req, res) => 
 		const property = await Property.findById(propertyId);
 		if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
 
-		const today = toYMD(new Date());
-		const maxDate = toYMD(addDays(new Date(), 30));
-		if (date < today || date > maxDate) {
+		const now = new Date();
+		const today = toYMD(now);
+		const maxDate = toYMD(addDays(now, 30));
+		
+		// Rule 1: If the selected date is in the past → block it completely
+		if (date < today) {
+			return res.status(400).json({ success: false, message: 'Cannot create slots for past dates' });
+		}
+		
+		// Validate date is within allowed range
+		if (date > maxDate) {
 			return res.status(400).json({ success: false, message: 'Date must be within the next 30 days' });
 		}
 
 		const created = [];
+		const currentHour = now.getHours();
+		const currentMinute = now.getMinutes();
+		
 		for (const start of times) {
 			const [h, m] = start.split(':').map(Number);
+			
+			// Rule 2: If the selected date is today → only allow time slots that are at least 10 minutes later than the current time
+			if (date === today) {
+				// Calculate if this time is at least 10 minutes in the future
+				if (h < currentHour || (h === currentHour && m < currentMinute + 10)) {
+					continue; // Skip this time slot as it's less than 10 minutes in the future
+				}
+			}
+			
 			const endH = m + 30 >= 60 ? h + 1 : h;
 			const endM = (m + 30) % 60;
 			const end = `${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}`;
@@ -210,8 +230,25 @@ router.get('/availability/:propertyId', async (req, res) => {
 
 		const blackout = await UnavailableDate.find({ property: property._id, date: { $gte: start, $lte: end } });
 		const blackoutSet = new Set(blackout.map(b => b.date));
-		const slots = await VisitSlot.find({ property: property._id, date: { $gte: start, $lte: end }, isBooked: false })
-			.sort({ date: 1, startTime: 1 });
+		// Get current date and time for filtering expired slots
+		const now = new Date();
+		const currentDate = toYMD(now);
+		const currentHour = now.getHours();
+		const currentMinute = now.getMinutes();
+		const currentTime = `${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`;
+		
+		// Filter out expired slots (past dates or today with time in the past)
+		const slots = await VisitSlot.find({
+			property: property._id,
+			date: { $gte: start, $lte: end },
+			isBooked: false,
+			$or: [
+				{ date: { $gt: currentDate } }, // Future dates
+				{ date: currentDate, startTime: { $gt: currentTime } } // Today but future time
+			]
+		})
+			.sort({ date: 1, startTime: 1 })
+			.lean();
 
 		// Group by date and exclude blackout dates
 		const byDate = {};
