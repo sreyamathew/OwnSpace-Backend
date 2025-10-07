@@ -8,6 +8,7 @@ const authRoutes = require('./routes/authRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const visitRoutes = require('./routes/visitRoutes');
+const offerRoutes = require('./routes/offerRoutes');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -84,6 +85,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/visits', visitRoutes);
+app.use('/api/offers', offerRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

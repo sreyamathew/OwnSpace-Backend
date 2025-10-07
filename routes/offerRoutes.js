@@ -7,7 +7,7 @@ const { protect } = require('../middleware/auth');
 // Create a new offer
 router.post('/', protect, async (req, res) => {
   try {
-    const { propertyId, investorId, agentId, offerAmount, message } = req.body;
+    const { propertyId, investorId, agentId, offerAmount, amount, message, preferredDate } = req.body;
     
     // Validate required fields
     if (!propertyId || !investorId || !agentId) {
@@ -18,8 +18,9 @@ router.post('/', protect, async (req, res) => {
       propertyId,
       investorId,
       agentId,
-      offerAmount: offerAmount || 0,
-      message: message || "I'm interested in buying this property."
+      offerAmount: typeof amount === 'number' ? amount : (offerAmount || 0),
+      message: message || "I'm interested in buying this property.",
+      preferredDate: preferredDate ? new Date(preferredDate) : undefined
     });
 
     const savedOffer = await newOffer.save();
@@ -50,6 +51,31 @@ router.get('/my', protect, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
+// Get offers by specific user id (admin/agent can view others; user can view own)
+router.get('/:userId', protect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requester = req.userProfile;
+    if (!requester) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    // Users can only view their own offers unless admin/agent
+    if (String(requester._id) !== String(userId) && !['admin','agent'].includes(requester.userType)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    const offers = await Offer.find({ investorId: userId })
+      .populate('propertyId', 'title address price images')
+      .populate('investorId', 'name email')
+      .populate('agentId', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, count: offers.length, offers });
+  } catch (err) {
+    console.error('Error fetching offers by userId:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 
 // Get offers received for properties managed by the current agent (or all for admin)
 router.get('/received', protect, async (req, res) => {

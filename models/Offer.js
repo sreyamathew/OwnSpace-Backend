@@ -16,6 +16,10 @@ const offerSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  preferredDate: {
+    type: Date,
+    required: false
+  },
   offerAmount: {
     type: Number,
     required: true
