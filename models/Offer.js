@@ -28,6 +28,10 @@ const offerSchema = new mongoose.Schema({
     type: String,
     default: "I'm interested in buying this property."
   },
+  timestamp: {
+    type: Date,
+    default: Date.now
+  },
   status: {
     type: String,
     enum: ['pending', 'accepted', 'rejected', 'withdrawn'],

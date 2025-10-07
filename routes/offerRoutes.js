@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Offer = require('../models/Offer');
 const User = require('../models/User');
+const Property = require('../models/Property');
 const { protect } = require('../middleware/auth');
 
 // Create a new offer
@@ -10,14 +11,27 @@ router.post('/', protect, async (req, res) => {
     const { propertyId, investorId, agentId, offerAmount, amount, message, preferredDate } = req.body;
     
     // Validate required fields
-    if (!propertyId || !investorId || !agentId) {
-      return res.status(400).json({ message: 'Property, investor, and agent IDs are required' });
+    if (!propertyId) {
+      return res.status(400).json({ message: 'Property ID is required' });
+    }
+
+    // Resolve investorId from auth if not provided
+    const resolvedInvestorId = investorId || req.userProfile?._id;
+
+    // Resolve agentId from property if not provided
+    let resolvedAgentId = agentId;
+    if (!resolvedAgentId) {
+      const prop = await Property.findById(propertyId).select('agent');
+      if (!prop || !prop.agent) {
+        return res.status(400).json({ message: 'Unable to resolve agent for this property' });
+      }
+      resolvedAgentId = prop.agent;
     }
 
     const newOffer = new Offer({
       propertyId,
-      investorId,
-      agentId,
+      investorId: resolvedInvestorId,
+      agentId: resolvedAgentId,
       offerAmount: typeof amount === 'number' ? amount : (offerAmount || 0),
       message: message || "I'm interested in buying this property.",
       preferredDate: preferredDate ? new Date(preferredDate) : undefined
@@ -36,6 +50,7 @@ router.post('/', protect, async (req, res) => {
 });
 
 // Get offers created by the current user (investor)
+// IMPORTANT: Keep specific routes before generic "/:userId" to avoid shadowing
 router.get('/my', protect, async (req, res) => {
   try {
     // use authenticated profile id from middleware
@@ -51,32 +66,6 @@ router.get('/my', protect, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
-// Get offers by specific user id (admin/agent can view others; user can view own)
-router.get('/:userId', protect, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const requester = req.userProfile;
-    if (!requester) return res.status(401).json({ success: false, message: 'Unauthorized' });
-
-    // Users can only view their own offers unless admin/agent
-    if (String(requester._id) !== String(userId) && !['admin','agent'].includes(requester.userType)) {
-      return res.status(403).json({ success: false, message: 'Forbidden' });
-    }
-
-    const offers = await Offer.find({ investorId: userId })
-      .populate('propertyId', 'title address price images')
-      .populate('investorId', 'name email')
-      .populate('agentId', 'name email')
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({ success: true, count: offers.length, offers });
-  } catch (err) {
-    console.error('Error fetching offers by userId:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
-  }
-});
-
-
 // Get offers received for properties managed by the current agent (or all for admin)
 router.get('/received', protect, async (req, res) => {
   try {
@@ -104,9 +93,66 @@ router.get('/received', protect, async (req, res) => {
       .populate('agentId', 'name email')
       .sort({ createdAt: -1 });
 
+    if (!offers || offers.length === 0) {
+      return res.status(200).json({ success: true, message: 'No offer requests found', offers: [] });
+    }
     res.status(200).json({ success: true, count: offers.length, offers });
   } catch (err) {
     console.error('Error fetching received offers:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Get offers by specific agent id (agent themselves or admin)
+router.get('/agent/:agentId', protect, async (req, res) => {
+  try {
+    const { agentId } = req.params;
+    const requester = req.userProfile;
+    if (!requester) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    // Agents can only view their own; admins can view any agent
+    if (requester.userType === 'agent' && String(requester._id) !== String(agentId)) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const offers = await Offer.find({ agentId })
+      .populate('propertyId', 'title address price images')
+      .populate('investorId', 'name email')
+      .populate('agentId', 'name email')
+      .sort({ createdAt: -1 });
+
+    if (!offers || offers.length === 0) {
+      return res.status(200).json({ success: true, message: 'No offer requests found', offers: [] });
+    }
+    res.status(200).json({ success: true, count: offers.length, offers });
+  } catch (err) {
+    console.error('Error fetching offers by agent:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
+// Get offers by specific user id (admin/agent can view others; user can view own)
+// NOTE: This generic route must come AFTER '/received' and '/agent/:agentId'
+router.get('/:userId', protect, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requester = req.userProfile;
+    if (!requester) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    // Users can only view their own offers unless admin/agent
+    if (String(requester._id) !== String(userId) && !['admin','agent'].includes(requester.userType)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    const offers = await Offer.find({ investorId: userId })
+      .populate('propertyId', 'title address price images')
+      .populate('investorId', 'name email')
+      .populate('agentId', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ success: true, count: offers.length, offers });
+  } catch (err) {
+    console.error('Error fetching offers by userId:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
