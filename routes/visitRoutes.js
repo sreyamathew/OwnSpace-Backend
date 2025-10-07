@@ -372,7 +372,11 @@ router.get('/my', protect, async (req, res) => {
 		const filter = { requester: req.user.userId };
 		if (status) filter.status = status;
 		const items = await VisitRequest.find(filter)
-			.populate('property', 'title address images')
+			.populate({
+				path: 'property',
+				select: 'title address images agent',
+				populate: { path: 'agent', select: 'name' }
+			})
 			.sort({ scheduledAt: 1 });
 		res.json({ success: true, data: items });
 	} catch (e) {
@@ -385,7 +389,11 @@ router.get('/assigned', protect, async (req, res) => {
 	try {
 		const { status = 'pending' } = req.query;
 		const items = await VisitRequest.find({ recipient: req.user.userId, status })
-			.populate('property', 'title address images')
+			.populate({
+				path: 'property',
+				select: 'title address images agent',
+				populate: { path: 'agent', select: 'name' }
+			})
 			.sort({ scheduledAt: 1 });
 		res.json({ success: true, data: items });
 	} catch (e) {
