@@ -34,7 +34,7 @@ router.post('/advance-payment', protect, async (req, res) => {
     offer.advancePaid = true;
     offer.advanceAmount = 50000;
     offer.advancePaidAt = new Date();
-    offer.status = 'advance_paid';
+    // Keep the offer in accepted state so it continues to appear under the 'Accepted' filter
     await offer.save();
 
     res.json({
