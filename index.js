@@ -9,6 +9,8 @@ const agentRoutes = require('./routes/agentRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const visitRoutes = require('./routes/visitRoutes');
 const offerRoutes = require('./routes/offerRoutes');
+const purchaseRoutes = require('./routes/purchaseRoutes');
+const Razorpay = require('razorpay');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -54,6 +56,11 @@ const VisitSlot = require('./models/VisitSlot');
 // Function to clean up expired slots
 const cleanupExpiredSlots = async () => {
   try {
+    // Skip if DB not connected
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('🛑 Skipping cleanup: MongoDB not connected');
+      return;
+    }
     const now = new Date();
     const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
     const currentHour = now.getHours();
@@ -86,6 +93,45 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/visits', visitRoutes);
 app.use('/api/offers', offerRoutes);
+app.use('/api/purchase', purchaseRoutes);
+
+// Payment: Razorpay order creation (test)
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_RQvwxfrTu00hqp',
+  key_secret: process.env.RAZORPAY_KEY_SECRET || 'lc1B2qkCH3v7eVjStPcs9rTY',
+});
+
+app.post('/api/payments/order', async (req, res) => {
+  try {
+    const { amount, currency = 'INR', receipt } = req.body || {};
+    const parsedAmountInRupees = Number(amount);
+    if (!Number.isFinite(parsedAmountInRupees)) {
+      return res.status(400).json({ success: false, message: 'Invalid amount' });
+    }
+
+    // Limits (configurable). Razorpay minimum is 100 paise (₹1.00)
+    const minAmountInPaise = 100;
+    const maxAmountInRupees = Number(process.env.RAZORPAY_MAX_AMOUNT_INR || 100000); // default ₹1,00,000
+    const maxAmountInPaise = Math.round(maxAmountInRupees * 100);
+
+    const minorAmount = Math.round(parsedAmountInRupees * 100);
+    if (minorAmount < minAmountInPaise) {
+      return res.status(400).json({ success: false, message: 'Amount below minimum allowed (₹1.00)' });
+    }
+    if (minorAmount > maxAmountInPaise) {
+      return res.status(400).json({ success: false, message: 'Amount exceeds maximum allowed' });
+    }
+
+    const order = await razorpay.orders.create({ amount: minorAmount, currency, receipt: receipt || `rcpt_${Date.now()}` });
+    res.json({ success: true, order });
+  } catch (e) {
+    console.error('Failed to create Razorpay order', e?.error || e);
+    res.status(500).json({ 
+      success: false, 
+      message: e?.error?.description || e?.message || 'Failed to create payment order' 
+    });
+  }
+});
 
 // Health check route
 app.get('/api/health', (req, res) => {

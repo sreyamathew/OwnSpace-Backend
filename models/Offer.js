@@ -34,7 +34,7 @@ const offerSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'accepted', 'rejected', 'withdrawn'],
+    enum: ['pending', 'accepted', 'rejected', 'withdrawn', 'advance_paid'],
     default: 'pending'
   },
   createdAt: {
@@ -44,6 +44,25 @@ const offerSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  // Advance payment tracking (optional)
+  advancePaid: {
+    type: Boolean,
+    default: false
+  },
+  advanceAmount: {
+    type: Number,
+    required: false
+  },
+  advancePaidAt: {
+    type: Date,
+    required: false
+  },
+  paymentRef: {
+    orderId: { type: String },
+    paymentId: { type: String },
+    signature: { type: String },
+    method: { type: String }
   }
 });
 

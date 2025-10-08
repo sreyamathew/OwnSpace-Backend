@@ -157,6 +157,33 @@ router.get('/:userId', protect, async (req, res) => {
   }
 });
 
+// Mark advance payment as paid and store transaction
+router.post('/:offerId/advance', protect, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const { amount, orderId, paymentId, signature, method } = req.body || {};
+
+    const offer = await Offer.findById(offerId);
+    if (!offer) return res.status(404).json({ success: false, message: 'Offer not found' });
+
+    // Ensure requester is the investor
+    if (String(offer.investorId) !== String(req.userProfile._id)) {
+      return res.status(403).json({ success: false, message: 'Forbidden' });
+    }
+
+    offer.advancePaid = true;
+    offer.advanceAmount = Number(amount || 0);
+    offer.advancePaidAt = new Date();
+    offer.paymentRef = { orderId, paymentId, signature, method };
+    await offer.save();
+
+    res.json({ success: true, offer });
+  } catch (err) {
+    console.error('Error marking advance paid:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
 // Update offer status (Approve/Reject)
 router.put('/:offerId', protect, async (req, res) => {
   try {

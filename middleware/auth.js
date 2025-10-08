@@ -51,10 +51,11 @@ const protect = async (req, res, next) => {
       next();
 
     } catch (jwtError) {
-      console.log('❌ Authentication failed: Invalid token', jwtError.message);
+      const isExpired = jwtError?.name === 'TokenExpiredError' || /jwt expired/i.test(jwtError?.message || '');
+      console.log('❌ Authentication failed:', isExpired ? 'Token expired' : `Invalid token (${jwtError?.message})`);
       return res.status(401).json({
         success: false,
-        message: 'Invalid token'
+        message: isExpired ? 'Token expired' : 'Invalid token'
       });
     }
 
