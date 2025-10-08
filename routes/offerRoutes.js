@@ -4,6 +4,7 @@ const Offer = require('../models/Offer');
 const User = require('../models/User');
 const Property = require('../models/Property');
 const { protect } = require('../middleware/auth');
+const transporter = require('../utils/mailer');
 
 // Create a new offer
 router.post('/', protect, async (req, res) => {
@@ -38,6 +39,34 @@ router.post('/', protect, async (req, res) => {
     });
 
     const savedOffer = await newOffer.save();
+    // Best-effort email notification to agent about new purchase request
+    try {
+      const [agentUser, investorUser, property] = await Promise.all([
+        User.findById(resolvedAgentId).select('name email'),
+        User.findById(resolvedInvestorId).select('name email'),
+        Property.findById(propertyId).select('title address price')
+      ]);
+
+      if (agentUser?.email) {
+        const buyerName = investorUser?.name || 'A buyer';
+        const propTitle = property?.title || 'a property';
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: agentUser.email,
+          subject: 'New Purchase Request Received',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px;">
+              <h2 style="margin:0 0 12px 0;">New Purchase Request</h2>
+              <p>${buyerName} has sent a purchase request for <strong>${propTitle}</strong>.</p>
+              <p>Offer amount: <strong>₹${(typeof amount === 'number' ? amount : offerAmount || 0).toLocaleString('en-IN')}</strong></p>
+              <p>Please review the request in your dashboard.</p>
+            </div>
+          `
+        });
+      }
+    } catch (mailErr) {
+      console.warn('Failed to send new offer email:', mailErr?.message || mailErr);
+    }
     
     res.status(201).json({
       success: true,
@@ -177,6 +206,32 @@ router.post('/:offerId/advance', protect, async (req, res) => {
     offer.paymentRef = { orderId, paymentId, signature, method };
     await offer.save();
 
+    // Notify agent/admin that advance was paid
+    try {
+      const [agentUser, investorUser, property] = await Promise.all([
+        User.findById(offer.agentId).select('name email'),
+        User.findById(offer.investorId).select('name email'),
+        Property.findById(offer.propertyId).select('title')
+      ]);
+      if (agentUser?.email) {
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: agentUser.email,
+          subject: 'Advance Payment Received',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px;">
+              <h2 style="margin:0 0 12px 0;">Advance Payment Received</h2>
+              <p>The buyer ${investorUser?.name || ''} has paid an advance for <strong>${property?.title || 'the property'}</strong>.</p>
+              <p>Amount: <strong>₹${Number(amount || offer.advanceAmount || 0).toLocaleString('en-IN')}</strong></p>
+              <p>Payment ID: ${paymentId || ''}</p>
+            </div>
+          `
+        });
+      }
+    } catch (mailErr) {
+      console.warn('Failed to send advance payment email:', mailErr?.message || mailErr);
+    }
+
     res.json({ success: true, offer });
   } catch (err) {
     console.error('Error marking advance paid:', err);
@@ -239,6 +294,32 @@ router.put('/:offerId', protect, async (req, res) => {
     offer.updatedAt = Date.now();
     
     const updatedOffer = await offer.save();
+
+    // Notify buyer about status change (accepted/rejected/pending)
+    try {
+      const [buyer, property] = await Promise.all([
+        User.findById(offer.investorId).select('name email'),
+        Property.findById(offer.propertyId).select('title')
+      ]);
+      if (buyer?.email) {
+        const humanStatus = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: buyer.email,
+          subject: `Your Purchase Request ${humanStatus}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px;">
+              <h2 style="margin:0 0 12px 0;">Purchase Request ${humanStatus}</h2>
+              <p>Hello ${buyer.name || ''},</p>
+              <p>Your purchase request for <strong>${property?.title || 'the property'}</strong> has been <strong>${normalized}</strong>.</p>
+              <p>Please check your dashboard for details.</p>
+            </div>
+          `
+        });
+      }
+    } catch (mailErr) {
+      console.warn('Failed to send offer status email:', mailErr?.message || mailErr);
+    }
     
     res.status(200).json({
       success: true,
