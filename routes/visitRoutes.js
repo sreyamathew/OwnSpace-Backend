@@ -386,19 +386,53 @@ router.get('/my', protect, async (req, res) => {
 
 // List requests assigned to me (as recipient)
 router.get('/assigned', protect, async (req, res) => {
-	try {
-		const { status = 'pending' } = req.query;
-		const items = await VisitRequest.find({ recipient: req.user.userId, status })
-			.populate({
-				path: 'property',
-				select: 'title address images agent',
-				populate: { path: 'agent', select: 'name' }
-			})
-			.sort({ scheduledAt: 1 });
-		res.json({ success: true, data: items });
-	} catch (e) {
-		res.status(500).json({ success: false, message: 'Failed to fetch assigned requests' });
-	}
+    try {
+        // Support filtering by status and future/past flags
+        // Defaults: status=approved for dashboard usage if not explicitly provided
+        let { status, futureOnly, pastOnly } = req.query;
+        if (!status) status = 'approved';
+
+        const baseQuery = { recipient: req.user.userId };
+
+        // Build default mongoose query (by single status)
+        let mongooseQuery = VisitRequest.find({ ...baseQuery, status })
+            .populate({
+                path: 'property',
+                select: 'title address images agent',
+                populate: { path: 'agent', select: 'name' }
+            })
+            .sort({ scheduledAt: 1 });
+
+        // If futureOnly=true, filter scheduledAt to be in the future
+        if (String(futureOnly).toLowerCase() === 'true') {
+            const now = new Date();
+            mongooseQuery = VisitRequest.find({ ...baseQuery, status, scheduledAt: { $gt: now } })
+                .populate({
+                    path: 'property',
+                    select: 'title address images agent',
+                    populate: { path: 'agent', select: 'name' }
+                })
+                .sort({ scheduledAt: 1 });
+        }
+
+        // If pastOnly=true, include approved + visited + not visited and scheduled in the past
+        if (String(pastOnly).toLowerCase() === 'true') {
+            const now = new Date();
+            const statuses = ['approved', 'visited', 'not visited'];
+            mongooseQuery = VisitRequest.find({ ...baseQuery, status: { $in: statuses }, scheduledAt: { $lt: now } })
+                .populate({
+                    path: 'property',
+                    select: 'title address images agent',
+                    populate: { path: 'agent', select: 'name' }
+                })
+                .sort({ scheduledAt: -1 }); // most recent past first
+        }
+
+        const items = await mongooseQuery;
+        res.json({ success: true, data: items });
+    } catch (e) {
+        res.status(500).json({ success: false, message: 'Failed to fetch assigned requests' });
+    }
 });
 
 // Reschedule a visit by requester (sets status back to pending)
