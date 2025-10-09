@@ -192,27 +192,54 @@ router.post('/:offerId/advance', protect, async (req, res) => {
     const { offerId } = req.params;
     const { amount, orderId, paymentId, signature, method } = req.body || {};
 
+    // Find the offer by ID
     const offer = await Offer.findById(offerId);
-    if (!offer) return res.status(404).json({ success: false, message: 'Offer not found' });
+    if (!offer) {
+      return res.status(404).json({ success: false, message: 'Offer not found' });
+    }
 
     // Ensure requester is the investor
     if (String(offer.investorId) !== String(req.userProfile._id)) {
       return res.status(403).json({ success: false, message: 'Forbidden' });
     }
 
+    // Check if advance is already paid
+    if (offer.advancePaid) {
+      return res.json({ success: true, message: 'Advance already paid.' });
+    }
+
+    // Allow payment only if status === "accepted"
+    if (offer.status !== 'accepted') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Purchase request must be accepted before advance payment' 
+      });
+    }
+
+    // Set advance payment details
     offer.advancePaid = true;
     offer.advanceAmount = Number(amount || 0);
     offer.advancePaidAt = new Date();
-    offer.paymentRef = { orderId, paymentId, signature, method };
+    offer.paymentDetails = {
+      amount: Number(amount || 0),
+      orderId,
+      paymentId,
+      signature,
+      method,
+      date: new Date()
+    };
+
+    // Save the offer
     await offer.save();
 
-    // Notify agent/admin that advance was paid
+    // Send confirmation email to admin/agent who listed the property
     try {
       const [agentUser, investorUser, property] = await Promise.all([
         User.findById(offer.agentId).select('name email'),
         User.findById(offer.investorId).select('name email'),
         Property.findById(offer.propertyId).select('title')
       ]);
+      
       if (agentUser?.email) {
         await transporter.sendMail({
           from: process.env.EMAIL_USER,
@@ -222,8 +249,9 @@ router.post('/:offerId/advance', protect, async (req, res) => {
             <div style="font-family: Arial, sans-serif; max-width: 600px;">
               <h2 style="margin:0 0 12px 0;">Advance Payment Received</h2>
               <p>The buyer ${investorUser?.name || ''} has paid an advance for <strong>${property?.title || 'the property'}</strong>.</p>
-              <p>Amount: <strong>₹${Number(amount || offer.advanceAmount || 0).toLocaleString('en-IN')}</strong></p>
+              <p>Amount: <strong>₹${Number(amount || 0).toLocaleString('en-IN')}</strong></p>
               <p>Payment ID: ${paymentId || ''}</p>
+              <p>Order ID: ${orderId || ''}</p>
             </div>
           `
         });
@@ -232,7 +260,7 @@ router.post('/:offerId/advance', protect, async (req, res) => {
       console.warn('Failed to send advance payment email:', mailErr?.message || mailErr);
     }
 
-    res.json({ success: true, offer });
+    res.json({ success: true, message: 'Advance payment successful.' });
   } catch (err) {
     console.error('Error marking advance paid:', err);
     res.status(500).json({ success: false, message: 'Server error', error: err.message });

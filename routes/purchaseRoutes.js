@@ -25,8 +25,9 @@ router.post('/advance-payment', protect, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Purchase request not found' });
     }
 
-    const status = (offer.status || '').toLowerCase();
-    if (status !== 'accepted' && status !== 'approved') {
+    console.log('Offer status:', offer.status);
+    const normalizedStatus = (offer.status || '').trim().toLowerCase();
+    if (!['accepted', 'approved'].includes(normalizedStatus)) {
       return res.status(400).json({ success: false, message: 'Purchase request must be accepted before advance payment' });
     }
     if (offer.advancePaid) {

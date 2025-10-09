@@ -63,6 +63,14 @@ const offerSchema = new mongoose.Schema({
     paymentId: { type: String },
     signature: { type: String },
     method: { type: String }
+  },
+  paymentDetails: {
+    amount: { type: Number },
+    orderId: { type: String },
+    paymentId: { type: String },
+    signature: { type: String },
+    method: { type: String },
+    date: { type: Date }
   }
 });
 

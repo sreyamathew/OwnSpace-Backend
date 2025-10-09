@@ -9,7 +9,6 @@ const agentRoutes = require('./routes/agentRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const visitRoutes = require('./routes/visitRoutes');
 const offerRoutes = require('./routes/offerRoutes');
-const purchaseRoutes = require('./routes/purchaseRoutes');
 const Razorpay = require('razorpay');
 
 const app = express();
@@ -93,7 +92,6 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/visits', visitRoutes);
 app.use('/api/offers', offerRoutes);
-app.use('/api/purchase', purchaseRoutes);
 
 // Payment: Razorpay order creation (test)
 const razorpay = new Razorpay({
