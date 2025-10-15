@@ -46,7 +46,7 @@ mongoose.connect(mongoURI)
   })
   .catch(err => {
     console.error('❌ Error connecting to MongoDB:', err);
-    process.exit(1);
+    console.warn('⚠️  Continuing to run server without DB connection for payment testing...');
   });
 
 // Automatic cleanup for expired visit slots
@@ -128,6 +128,16 @@ app.post('/api/payments/order', async (req, res) => {
       success: false, 
       message: e?.error?.description || e?.message || 'Failed to create payment order' 
     });
+  }
+});
+
+// Expose Razorpay public key to the frontend to avoid key/order mismatches
+app.get('/api/payments/key', (req, res) => {
+  try {
+    const keyId = process.env.RAZORPAY_KEY_ID || 'rzp_test_RQvwxfrTu00hqp';
+    return res.json({ success: true, keyId });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'Failed to retrieve Razorpay key' });
   }
 });
 
