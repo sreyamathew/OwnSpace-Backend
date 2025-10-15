@@ -401,6 +401,7 @@ router.get('/assigned', protect, async (req, res) => {
                 select: 'title address images agent',
                 populate: { path: 'agent', select: 'name' }
             })
+            .populate('requester', 'name email phone')
             .sort({ scheduledAt: 1 });
 
         // If futureOnly=true, filter scheduledAt to be in the future
@@ -412,6 +413,7 @@ router.get('/assigned', protect, async (req, res) => {
                     select: 'title address images agent',
                     populate: { path: 'agent', select: 'name' }
                 })
+                .populate('requester', 'name email phone')
                 .sort({ scheduledAt: 1 });
         }
 
@@ -425,6 +427,7 @@ router.get('/assigned', protect, async (req, res) => {
                     select: 'title address images agent',
                     populate: { path: 'agent', select: 'name' }
                 })
+                .populate('requester', 'name email phone')
                 .sort({ scheduledAt: -1 }); // most recent past first
         }
 
@@ -432,6 +435,30 @@ router.get('/assigned', protect, async (req, res) => {
         res.json({ success: true, data: items });
     } catch (e) {
         res.status(500).json({ success: false, message: 'Failed to fetch assigned requests' });
+    }
+});
+
+// List pending requests assigned to me (as recipient) - for approval/rejection
+router.get('/pending', protect, authorize('agent', 'admin'), async (req, res) => {
+    try {
+        const baseQuery = { 
+            recipient: req.user.userId,
+            status: 'pending'
+        };
+
+        const items = await VisitRequest.find(baseQuery)
+            .populate({
+                path: 'property',
+                select: 'title address images agent propertyType price',
+                populate: { path: 'agent', select: 'name email' }
+            })
+            .populate('requester', 'name email phone')
+            .sort({ createdAt: -1 }); // most recent first
+
+        res.json({ success: true, data: items });
+    } catch (e) {
+        console.error('Fetch pending requests error:', e);
+        res.status(500).json({ success: false, message: 'Failed to fetch pending requests' });
     }
 });
 
