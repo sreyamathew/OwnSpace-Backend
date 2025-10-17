@@ -5,6 +5,7 @@ const User = require('../models/User');
 const Property = require('../models/Property');
 const { protect } = require('../middleware/auth');
 const transporter = require('../utils/mailer');
+const { createNotification, notifyAdmins } = require('../utils/notificationService');
 
 // Create a new offer
 router.post('/', protect, async (req, res) => {
@@ -39,7 +40,6 @@ router.post('/', protect, async (req, res) => {
     });
 
     const savedOffer = await newOffer.save();
-    // Best-effort email notification to agent about new purchase request
     try {
       const [agentUser, investorUser, property] = await Promise.all([
         User.findById(resolvedAgentId).select('name email'),
@@ -47,9 +47,23 @@ router.post('/', protect, async (req, res) => {
         Property.findById(propertyId).select('title address price')
       ]);
 
+      const buyerName = investorUser?.name || 'A buyer';
+      const propTitle = property?.title || 'a property';
+      await createNotification({
+        userId: resolvedAgentId,
+        type: 'purchase',
+        title: 'New Purchase Request',
+        message: `${buyerName} submitted a purchase request for ${propTitle}.`,
+        metadata: { offerId: savedOffer._id, propertyId }
+      });
+      await notifyAdmins(
+        'purchase',
+        'New Purchase Request',
+        `${buyerName} submitted a purchase request for ${propTitle}.`,
+        { offerId: savedOffer._id, propertyId }
+      );
+
       if (agentUser?.email) {
-        const buyerName = investorUser?.name || 'A buyer';
-        const propTitle = property?.title || 'a property';
         await transporter.sendMail({
           from: process.env.EMAIL_USER,
           to: agentUser.email,
@@ -64,8 +78,8 @@ router.post('/', protect, async (req, res) => {
           `
         });
       }
-    } catch (mailErr) {
-      console.warn('Failed to send new offer email:', mailErr?.message || mailErr);
+    } catch (notifyErr) {
+      console.warn('Failed to deliver purchase request notifications:', notifyErr?.message || notifyErr);
     }
     
     res.status(201).json({
@@ -232,13 +246,26 @@ router.post('/:offerId/advance', protect, async (req, res) => {
     // Save the offer
     await offer.save();
 
-    // Send confirmation email to admin/agent who listed the property
     try {
       const [agentUser, investorUser, property] = await Promise.all([
         User.findById(offer.agentId).select('name email'),
         User.findById(offer.investorId).select('name email'),
         Property.findById(offer.propertyId).select('title')
       ]);
+      
+      await createNotification({
+        userId: offer.agentId,
+        type: 'payment',
+        title: 'Advance Payment Received',
+        message: `${investorUser?.name || 'Buyer'} paid advance for ${property?.title || 'the property'}.`,
+        metadata: { offerId: offer._id, amount }
+      });
+      await notifyAdmins(
+        'payment',
+        'Advance Payment Received',
+        `${investorUser?.name || 'Buyer'} paid advance for ${property?.title || 'the property'}.`,
+        { offerId: offer._id, amount }
+      );
       
       if (agentUser?.email) {
         await transporter.sendMail({
@@ -256,8 +283,8 @@ router.post('/:offerId/advance', protect, async (req, res) => {
           `
         });
       }
-    } catch (mailErr) {
-      console.warn('Failed to send advance payment email:', mailErr?.message || mailErr);
+    } catch (notifyErr) {
+      console.warn('Failed to send advance payment notifications:', notifyErr?.message || notifyErr);
     }
 
     res.json({ success: true, message: 'Advance payment successful.' });
@@ -323,14 +350,26 @@ router.put('/:offerId', protect, async (req, res) => {
     
     const updatedOffer = await offer.save();
 
-    // Notify buyer about status change (accepted/rejected/pending)
     try {
       const [buyer, property] = await Promise.all([
         User.findById(offer.investorId).select('name email'),
         Property.findById(offer.propertyId).select('title')
       ]);
+      const humanStatus = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      await createNotification({
+        userId: offer.investorId,
+        type: 'purchase',
+        title: `Purchase Request ${humanStatus}`,
+        message: `Your purchase request for ${property?.title || 'the property'} was ${normalized}.`,
+        metadata: { offerId: offer._id, status: normalized }
+      });
+      await notifyAdmins(
+        'purchase',
+        'Purchase Request Updated',
+        `${req.userProfile?.name || 'Admin/Agent'} marked a purchase request as ${normalized} for ${property?.title || 'the property'}.`,
+        { offerId: offer._id, status: normalized }
+      );
       if (buyer?.email) {
-        const humanStatus = normalized.charAt(0).toUpperCase() + normalized.slice(1);
         await transporter.sendMail({
           from: process.env.EMAIL_USER,
           to: buyer.email,
@@ -345,8 +384,8 @@ router.put('/:offerId', protect, async (req, res) => {
           `
         });
       }
-    } catch (mailErr) {
-      console.warn('Failed to send offer status email:', mailErr?.message || mailErr);
+    } catch (notifyErr) {
+      console.warn('Failed to send offer status notifications:', notifyErr?.message || notifyErr);
     }
     
     res.status(200).json({

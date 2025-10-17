@@ -3,6 +3,7 @@ const router = express.Router();
 const Property = require('../models/Property');
 const User = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
+const { createNotification } = require('../utils/notificationService');
 
 // @route   GET /api/properties/debug/user
 // @desc    Debug current user
@@ -272,6 +273,18 @@ router.post('/', protect, authorize('admin', 'agent'), async (req, res) => {
     // Populate the response
     await property.populate('agent', 'name email phone agentProfile');
     await property.populate('createdBy', 'name email');
+
+    try {
+      await createNotification({
+        userId: req.user.userId,
+        type: 'status',
+        title: 'Property Listed Successfully',
+        message: `${title} has been published and is now live.`,
+        metadata: { propertyId: property._id }
+      });
+    } catch (notifyErr) {
+      console.warn('Failed to send property creation notification:', notifyErr?.message || notifyErr);
+    }
 
     res.status(201).json({
       success: true,

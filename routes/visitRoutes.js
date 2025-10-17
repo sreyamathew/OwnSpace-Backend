@@ -7,6 +7,7 @@ const transporter = require('../utils/mailer');
 const { protect, authorize } = require('../middleware/auth');
 const VisitSlot = require('../models/VisitSlot');
 const UnavailableDate = require('../models/UnavailableDate');
+const { createNotification, notifyAdmins } = require('../utils/notificationService');
 
 // Helpers
 const toYMD = (d) => {
@@ -91,6 +92,25 @@ router.post('/', protect, async (req, res) => {
 		slot.isBooked = true;
 		slot.bookedByVisitId = visit._id;
 		await slot.save();
+
+		const propertyTitle = property?.title || 'Property';
+		try {
+			await createNotification({
+				userId: recipientUser,
+				type: 'visit',
+				title: 'New Visit Request',
+				message: `A buyer requested a property visit for ${propertyTitle} on ${new Date(scheduledAt).toLocaleString()}.`,
+				metadata: { visitId: visit._id, propertyId: property._id }
+			});
+			await notifyAdmins(
+				'visit',
+				'New Visit Request',
+				`A buyer requested a property visit for ${propertyTitle}.`,
+				{ visitId: visit._id, propertyId: property._id }
+			);
+		} catch (notifyErr) {
+			console.warn('Visit request notification failed:', notifyErr?.message || notifyErr);
+		}
 
 		// Notify recipient by email (best-effort)
 		try {
@@ -283,6 +303,24 @@ router.put('/:id/status', protect, async (req, res) => {
 		// Best-effort email notification to requester when status changes
 		if (status === 'rejected' || status === 'approved') {
 			try {
+				await createNotification({
+					userId: visit.requester,
+					type: 'visit',
+					title: status === 'approved' ? 'Visit Request Approved' : 'Visit Request Rejected',
+					message: `Your visit request for ${visit?.property?.title || 'Property'} was ${status}.`,
+					metadata: { visitId: visit._id, status }
+				});
+				await notifyAdmins(
+					'visit',
+					'Visit Request Updated',
+					`${req.userProfile?.name || 'Recipient'} ${status} a visit request for ${visit?.property?.title || 'Property'}.`,
+					{ visitId: visit._id, status }
+				);
+			} catch (notifyErr) {
+				console.warn('Visit status notification failed:', notifyErr?.message || notifyErr);
+			}
+
+			try {
 				const requesterEmail = visit?.requester?.email;
 				if (requesterEmail) {
 					const subject = status === 'approved' ? 'Your Property Visit Was Approved' : 'Your Property Visit Was Cancelled';
@@ -341,6 +379,27 @@ router.put('/:id/visit-status', protect, authorize('agent', 'admin'), async (req
 		
 		visit.status = status;
 		await visit.save();
+		try {
+			await createNotification({
+				userId: visit.requester,
+				type: 'visit',
+				title: status === 'visited' ? 'Visit Completed' : 'Visit Not Completed',
+				message: `Your visit for ${visit?.property?.title || 'Property'} was marked as ${status}.`,
+				metadata: { visitId: visit._id, status }
+			});
+		} catch (notifyErr) {
+			console.warn('Visit completion notification failed:', notifyErr?.message || notifyErr);
+		}
+		try {
+			await notifyAdmins(
+				'visit',
+				'Visit Status Updated',
+				`${req.userProfile?.name || 'Recipient'} marked a visit as ${status} for ${visit?.property?.title || 'Property'}.`,
+				{ visitId: visit._id, status }
+			);
+		} catch (notifyErr) {
+			console.warn('Admin visit status notification failed:', notifyErr?.message || notifyErr);
+		}
 		
 		// Best-effort email notification to requester
 		try {

@@ -1,4 +1,5 @@
 require('dotenv').config();
+const http = require('http');
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -9,9 +10,12 @@ const agentRoutes = require('./routes/agentRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const visitRoutes = require('./routes/visitRoutes');
 const offerRoutes = require('./routes/offerRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const { initSocket } = require('./utils/socket');
 const Razorpay = require('razorpay');
 
 const app = express();
+const server = http.createServer(app);
 const port = process.env.PORT || 3001;
 
 // Middleware
@@ -92,6 +96,7 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/visits', visitRoutes);
 app.use('/api/offers', offerRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Payment: Razorpay order creation (test)
 const razorpay = new Razorpay({
@@ -158,7 +163,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(port, () => {
+initSocket(server);
+
+server.listen(port, () => {
   console.log(`🚀 Server is running on port ${port}`);
   console.log(`📱 API Health Check: http://localhost:${port}/api/health`);
 });
