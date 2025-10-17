@@ -104,8 +104,8 @@ router.get('/', async (req, res) => {
       sortBy
     } = req.query;
 
-    // Build filter object
-    const filter = { isActive: true, status: 'active' };
+    // Build filter object - include both active and sold properties for public viewing
+    const filter = { isActive: true, status: { $in: ['active', 'sold'] } };
     
     if (propertyType) filter.propertyType = propertyType;
     if (city) filter['address.city'] = new RegExp(city, 'i');

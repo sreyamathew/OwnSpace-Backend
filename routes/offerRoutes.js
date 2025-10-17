@@ -98,15 +98,45 @@ router.get('/my', protect, async (req, res) => {
   try {
     // use authenticated profile id from middleware
     const offers = await Offer.find({ investorId: req.userProfile._id })
-      .populate('propertyId', 'title address price images')
-      .populate('investorId', 'name email')
-      .populate('agentId', 'name email')
+      .populate('propertyId', 'title address price images status propertyType')
+      .populate('investorId', 'name email phone address')
+      .populate('agentId', 'name email phone')
       .sort({ createdAt: -1 });
 
     res.status(200).json({ success: true, count: offers.length, offers });
   } catch (err) {
     console.error('Error fetching my offers:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// Get advance-paid offers (Admin only)
+router.get('/advance-paid', protect, async (req, res) => {
+  try {
+    const requester = req.userProfile;
+    if (!requester || requester.userType !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const offers = await Offer.find({ advancePaid: true })
+      .populate({
+        path: 'propertyId',
+        select: 'title address price status propertyType images agent createdBy isActive updatedAt',
+        populate: [
+          { path: 'agent', select: 'name email phone agentProfile' },
+          { path: 'createdBy', select: 'name email' }
+        ]
+      })
+      .populate({
+        path: 'investorId',
+        select: 'name email phone address'
+      })
+      .sort({ updatedAt: -1 });
+
+    res.status(200).json({ success: true, data: { offers } });
+  } catch (err) {
+    console.error('Error fetching advance-paid offers:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 });
 // Get offers received for properties managed by the current agent (or all for admin)
@@ -290,6 +320,70 @@ router.post('/:offerId/advance', protect, async (req, res) => {
     res.json({ success: true, message: 'Advance payment successful.' });
   } catch (err) {
     console.error('Error marking advance paid:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
+// Mark advance-paid property as sold (Admin only)
+router.post('/:offerId/sell', protect, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const requester = req.userProfile;
+    if (!requester || requester.userType !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const offer = await Offer.findById(offerId).populate('propertyId').populate('investorId', 'name email');
+    if (!offer) {
+      return res.status(404).json({ success: false, message: 'Offer not found' });
+    }
+    if (!offer.advancePaid) {
+      return res.status(400).json({ success: false, message: 'Advance payment is required before finalizing sale' });
+    }
+
+    const property = await Property.findById(offer.propertyId?._id || offer.propertyId);
+    if (!property) {
+      return res.status(404).json({ success: false, message: 'Associated property not found' });
+    }
+
+    property.status = 'sold';
+    // Keep property active in database, just change status to 'sold'
+    await property.save();
+
+    offer.status = 'advance_paid';
+    offer.updatedAt = new Date();
+    await offer.save();
+
+    try {
+      await createNotification({
+        userId: offer.investorId?._id,
+        type: 'purchase',
+        title: 'Property Marked as Sold',
+        message: `Your property purchase (${property.title}) has been finalized as sold.`,
+        metadata: { offerId: offer._id, propertyId: property._id }
+      });
+
+      if (offer.investorId?.email) {
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: offer.investorId.email,
+          subject: 'Property Sale Finalized',
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px;">
+              <h2 style="margin:0 0 12px 0;">Congratulations!</h2>
+              <p>Your property purchase for <strong>${property.title}</strong> has been marked as sold.</p>
+              <p>Our team will contact you soon with the next steps.</p>
+            </div>
+          `
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('Failed to send sold property notification:', notifyErr?.message || notifyErr);
+    }
+
+    res.status(200).json({ success: true, message: 'Property marked as sold successfully', data: { offer, property } });
+  } catch (err) {
+    console.error('Error marking property as sold:', err);
     res.status(500).json({ success: false, message: 'Server error', error: err.message });
   }
 });
