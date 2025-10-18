@@ -7,6 +7,42 @@ const { protect } = require('../middleware/auth');
 const transporter = require('../utils/mailer');
 const { createNotification, notifyAdmins } = require('../utils/notificationService');
 
+// Get all offers (Admin only)
+router.get('/', protect, async (req, res) => {
+  try {
+    const requester = req.userProfile;
+    if (!requester || requester.userType !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Access denied. Admin access required.' });
+    }
+
+    const offers = await Offer.find({})
+      .populate({
+        path: 'propertyId',
+        select: 'title address price images status propertyType location'
+      })
+      .populate({
+        path: 'investorId',
+        select: 'name email phone address',
+        model: 'User'
+      })
+      .populate({
+        path: 'agentId',
+        select: 'name email phone',
+        model: 'User'
+      })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ 
+      success: true, 
+      data: { offers },
+      count: offers.length 
+    });
+  } catch (err) {
+    console.error('Error fetching all offers:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
 // Create a new offer
 router.post('/', protect, async (req, res) => {
   try {
