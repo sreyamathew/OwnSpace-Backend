@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const router = express.Router();
 const Property = require('../models/Property');
 const User = require('../models/User');
@@ -387,23 +388,39 @@ router.delete('/:id', protect, authorize('admin', 'agent'), async (req, res) => 
   }
 });
 
-// @route   GET /api/properties/agent/:agentId
-// @desc    Get properties by agent
+// @route   POST /api/properties/predict-price
+// @desc    Get estimated price from ML service
 // @access  Public
-router.get('/agent/:agentId', async (req, res) => {
+router.post('/predict-price', async (req, res) => {
   try {
-    const properties = await Property.getPropertiesByAgent(req.params.agentId);
+    const { location, size, bhk, bath } = req.body;
+    
+    // Validate basic inputs
+    if (!location || !size || !bhk || !bath) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required features for prediction'
+      });
+    }
+
+    // Call Flask ML API (running on port 5001)
+    const response = await axios.post('http://localhost:5001/predict-price', {
+      location,
+      size,
+      bhk,
+      bath
+    });
 
     res.json({
       success: true,
-      data: properties,
-      message: 'Agent properties retrieved successfully'
+      data: response.data,
+      message: 'Prediction generated successfully'
     });
   } catch (error) {
-    console.error('Error fetching agent properties:', error);
+    console.error('ML Prediction Error:', error.message);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch agent properties',
+      message: 'ML service is currently unavailable',
       error: error.message
     });
   }
