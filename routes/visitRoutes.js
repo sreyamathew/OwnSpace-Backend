@@ -59,7 +59,20 @@ router.post('/', protect, async (req, res) => {
 			return res.status(400).json({ success: false, message: 'Selected date is unavailable' });
 		}
 
-		const slot = await VisitSlot.findOne({ property: property._id, date: ymd, startTime: hm, isBooked: false });
+		const slotQuery = { property: property._id, date: ymd, startTime: hm, isBooked: false };
+		let slot = await VisitSlot.findOne(slotQuery);
+
+		// Attempt TZ fallback: if direct match fails, try local timezone guess
+		if (!slot) {
+			const tz = req.user?.timezone || property?.timezone || 'Asia/Kolkata';
+			const scheduledInLocal = scheduled.toLocaleString('en-US', { timeZone: tz });
+			const local = new Date(scheduledInLocal);
+			const fallbackHm = toHM(local);
+			if (fallbackHm !== hm) {
+				slot = await VisitSlot.findOne({ property: property._id, date: ymd, startTime: fallbackHm, isBooked: false });
+			}
+		}
+
 		if (!slot) {
 			return res.status(400).json({ success: false, message: 'Selected time slot is not available' });
 		}
