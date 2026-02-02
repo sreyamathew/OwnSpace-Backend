@@ -50,6 +50,10 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 
 // Session configuration for passport
 app.use(session({
@@ -93,8 +97,8 @@ const cleanupExpiredSlots = async () => {
     const currentDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
     const currentHour = now.getHours();
     const currentMinute = now.getMinutes();
-    const currentTime = `${String(currentHour).padStart(2,'0')}:${String(currentMinute).padStart(2,'0')}`;
-    
+    const currentTime = `${String(currentHour).padStart(2, '0')}:${String(currentMinute).padStart(2, '0')}`;
+
     // Find and remove expired slots (past dates or today with time in the past)
     const result = await VisitSlot.deleteMany({
       $or: [
@@ -102,7 +106,7 @@ const cleanupExpiredSlots = async () => {
         { date: currentDate, startTime: { $lt: currentTime } } // Today but past time
       ]
     });
-    
+
     console.log(`🧹 Cleaned up ${result.deletedCount} expired visit slots`);
   } catch (error) {
     console.error('Error cleaning up expired slots:', error);
@@ -154,9 +158,9 @@ app.post('/api/payments/order', async (req, res) => {
     res.json({ success: true, order });
   } catch (e) {
     console.error('Failed to create Razorpay order', e?.error || e);
-    res.status(500).json({ 
-      success: false, 
-      message: e?.error?.description || e?.message || 'Failed to create payment order' 
+    res.status(500).json({
+      success: false,
+      message: e?.error?.description || e?.message || 'Failed to create payment order'
     });
   }
 });

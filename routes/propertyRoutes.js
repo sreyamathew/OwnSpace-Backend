@@ -70,7 +70,7 @@ router.get('/test', async (req, res) => {
   try {
     console.log('=== TEST ENDPOINT HIT ===');
     console.log('Headers:', req.headers);
-    
+
     res.json({
       success: true,
       message: 'Property routes are working!',
@@ -92,13 +92,13 @@ router.get('/test', async (req, res) => {
 // @access  Public
 router.get('/', async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
-      propertyType, 
-      minPrice, 
-      maxPrice, 
-      city, 
+    const {
+      page = 1,
+      limit = 10,
+      propertyType,
+      minPrice,
+      maxPrice,
+      city,
       state,
       bedrooms,
       bathrooms,
@@ -107,13 +107,13 @@ router.get('/', async (req, res) => {
 
     // Build filter object - include both active and sold properties for public viewing
     const filter = { isActive: true, status: { $in: ['active', 'sold'] } };
-    
+
     if (propertyType) filter.propertyType = propertyType;
     if (city) filter['address.city'] = new RegExp(city, 'i');
     if (state) filter['address.state'] = new RegExp(state, 'i');
     if (bedrooms) filter.bedrooms = parseInt(bedrooms);
     if (bathrooms) filter.bathrooms = parseInt(bathrooms);
-    
+
     if (minPrice || maxPrice) {
       filter.price = {};
       if (minPrice) filter.price.$gte = parseInt(minPrice);
@@ -122,7 +122,7 @@ router.get('/', async (req, res) => {
 
     // Build sort object
     let sort = { createdAt: -1 }; // Default sort
-    
+
     if (sortBy) {
       switch (sortBy) {
         case 'price-low-high':
@@ -329,8 +329,8 @@ router.put('/:id', protect, authorize('admin', 'agent'), async (req, res) => {
       { ...req.body, updatedAt: new Date() },
       { new: true, runValidators: true }
     )
-    .populate('agent', 'name email phone agentProfile')
-    .populate('createdBy', 'name email');
+      .populate('agent', 'name email phone agentProfile')
+      .populate('createdBy', 'name email');
 
     res.json({
       success: true,
@@ -394,7 +394,7 @@ router.delete('/:id', protect, authorize('admin', 'agent'), async (req, res) => 
 router.post('/predict-price', async (req, res) => {
   try {
     const { location, size, bhk, bath } = req.body;
-    
+
     // Validate basic inputs
     if (!location || !size || !bhk || !bath) {
       return res.status(400).json({
@@ -403,8 +403,11 @@ router.post('/predict-price', async (req, res) => {
       });
     }
 
-    // Call Flask ML API (running on port 5001)
-    const response = await axios.post('http://localhost:5001/predict-price', {
+    // Call Flask ML API via environment variable
+    const mlApiUrl = process.env.ML_PRICE_API || 'http://localhost:5001';
+    console.log(`📡 Calling ML Service at: ${mlApiUrl}/predict-price`);
+
+    const response = await axios.post(`${mlApiUrl}/predict-price`, {
       location,
       size,
       bhk,
@@ -417,10 +420,26 @@ router.post('/predict-price', async (req, res) => {
       message: 'Prediction generated successfully'
     });
   } catch (error) {
-    console.error('ML Prediction Error:', error.message);
-    res.status(500).json({
+    // Detailed error logging for debugging Render connectivity
+    console.error('❌ ML Prediction Error:');
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      console.error(`- Status: ${error.response.status}`);
+      console.error(`- Data:`, error.response.data);
+    } else if (error.request) {
+      // The request was made but no response was received
+      console.error(`- No response received. Target: ${process.env.ML_PRICE_API}/predict-price`);
+    } else {
+      // Something happened in setting up the request
+      console.error(`- Error Message: ${error.message}`);
+    }
+
+    const status = error.response ? error.response.status : 500;
+    const message = error.response?.data?.error || error.message || 'ML service is currently unavailable';
+
+    res.status(status).json({
       success: false,
-      message: 'ML service is currently unavailable',
+      message: `ML_PROXY_ERROR: ${message}`,
       error: error.message
     });
   }
