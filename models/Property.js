@@ -110,6 +110,19 @@ const propertySchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
+  },
+  soldDate: {
+    type: Date
+  },
+  soldPrice: {
+    type: Number
+  },
+  predictedPrice: {
+    type: Number
+  },
+  riskCategory: {
+    type: String,
+    enum: ['Low', 'Medium', 'High']
   }
 }, {
   timestamps: true
@@ -124,24 +137,24 @@ propertySchema.index({ propertyType: 1 });
 propertySchema.index({ price: 1 });
 
 // Virtual for full address
-propertySchema.virtual('fullAddress').get(function() {
+propertySchema.virtual('fullAddress').get(function () {
   return `${this.address.street}, ${this.address.city}, ${this.address.state} ${this.address.zipCode}`.trim();
 });
 
 // Method to increment views
-propertySchema.methods.incrementViews = function() {
+propertySchema.methods.incrementViews = function () {
   this.views += 1;
   return this.save();
 };
 
 // Method to increment inquiries
-propertySchema.methods.incrementInquiries = function() {
+propertySchema.methods.incrementInquiries = function () {
   this.inquiries += 1;
   return this.save();
 };
 
 // Static method to get active properties
-propertySchema.statics.getActiveProperties = function() {
+propertySchema.statics.getActiveProperties = function () {
   return this.find({ isActive: true, status: 'active' })
     .populate('agent', 'name email phone agentProfile')
     .populate('createdBy', 'name email')
@@ -149,7 +162,7 @@ propertySchema.statics.getActiveProperties = function() {
 };
 
 // Static method to get properties by agent
-propertySchema.statics.getPropertiesByAgent = function(agentId) {
+propertySchema.statics.getPropertiesByAgent = function (agentId) {
   return this.find({ agent: agentId, isActive: true })
     .populate('agent', 'name email phone agentProfile')
     .sort({ createdAt: -1 });
