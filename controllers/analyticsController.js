@@ -9,31 +9,33 @@ const getMLAnalysis = async (properties) => {
 
         const analysisPromises = properties.map(async (prop) => {
             try {
-                const response = await axios.post(`${ML_SERVICE_URL}/predict-price`, {
+                // 1. Get predicted price
+                const predictResponse = await axios.post(`${ML_SERVICE_URL}/predict-price`, {
                     location: prop.address.city,
                     size: prop.area,
                     bhk: prop.bedrooms,
                     bath: prop.bathrooms,
-                    amenitiesScore: prop.features ? prop.features.length : 5, // Simple proxy
-                    propertyAge: 5 // Default for now
+                    amenitiesScore: prop.features ? prop.features.length : 5,
+                    propertyAge: 5
                 });
 
-                const predictedPrice = response.data.predicted_price;
-                const actualPrice = prop.price;
+                const predictedPrice = predictResponse.data.predicted_price;
 
-                // Risk analysis logic:
-                // High risk if actual price is > 30% higher than predicted
-                // Medium risk if actual price is 15-30% higher
-                let riskCategory = 'LOW';
-                if (actualPrice > predictedPrice * 1.3) riskCategory = 'HIGH';
-                else if (actualPrice > predictedPrice * 1.15) riskCategory = 'MEDIUM';
+                // 2. Get risk classification
+                const riskResponse = await axios.post(`${ML_SERVICE_URL}/classify-risk`, {
+                    listed_price: prop.price,
+                    predicted_price: predictedPrice
+                });
 
                 return {
                     propertyId: prop._id,
                     predictedPrice,
-                    riskCategory
+                    riskCategory: riskResponse.data.risk_category.toUpperCase(),
+                    riskScore: riskResponse.data.risk_score,
+                    explanation: riskResponse.data.explanation
                 };
             } catch (err) {
+                console.error(`Error analyzing property ${prop._id}:`, err.message);
                 return { propertyId: prop._id, predictedPrice: null, riskCategory: 'UNKNOWN' };
             }
         });

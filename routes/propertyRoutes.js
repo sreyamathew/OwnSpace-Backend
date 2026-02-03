@@ -445,4 +445,59 @@ router.post('/predict-price', async (req, res) => {
   }
 });
 
+// @route   POST /api/properties/classify-risk
+// @desc    Get risk classification from ML service
+// @access  Public
+router.post('/classify-risk', async (req, res) => {
+  try {
+    const { listed_price, predicted_price, propertyId } = req.body;
+
+    if (!listed_price || !predicted_price) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: listed_price and predicted_price'
+      });
+    }
+
+    const mlApiUrl = process.env.ML_PRICE_API || 'http://localhost:5001';
+    console.log(`📡 Calling ML Risk Service at: ${mlApiUrl}/classify-risk`);
+
+    const response = await axios.post(`${mlApiUrl}/classify-risk`, {
+      listed_price,
+      predicted_price
+    });
+
+    // Store in MongoDB if propertyId is provided
+    if (propertyId && response.data) {
+      try {
+        await Property.findByIdAndUpdate(propertyId, {
+          riskCategory: response.data.risk_category,
+          riskScore: response.data.risk_score,
+          riskExplanation: response.data.explanation,
+          predictedPrice: predicted_price
+        });
+        console.log(`✅ Risk data saved for property: ${propertyId}`);
+      } catch (saveErr) {
+        console.warn(`⚠️ Failed to save risk data: ${saveErr.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: response.data,
+      message: 'Risk classification generated successfully'
+    });
+  } catch (error) {
+    console.error('❌ ML Risk Classification Error:', error.message);
+    const status = error.response ? error.response.status : 500;
+    const message = error.response?.data?.error || error.message || 'ML service is currently unavailable';
+
+    res.status(status).json({
+      success: false,
+      message: `ML_PROXY_ERROR: ${message}`,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

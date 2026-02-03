@@ -123,6 +123,14 @@ const propertySchema = new mongoose.Schema({
   riskCategory: {
     type: String,
     enum: ['Low', 'Medium', 'High']
+  },
+  riskScore: {
+    type: Number,
+    min: 0,
+    max: 100
+  },
+  riskExplanation: {
+    type: String
   }
 }, {
   timestamps: true
