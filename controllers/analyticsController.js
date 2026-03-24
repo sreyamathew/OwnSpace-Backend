@@ -175,3 +175,132 @@ exports.getAIInsights = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.getModelPerformance = async (req, res) => {
+    try {
+        const ML_SERVICE_URL = process.env.ML_PRICE_API || process.env.ML_SERVICE_URL || 'http://127.0.0.1:5001';
+        
+        console.log(`Fetching model performance metrics from ${ML_SERVICE_URL}/model-performance`);
+        
+        const response = await axios.get(`${ML_SERVICE_URL}/model-performance`);
+        
+        if (response.data && response.data.success) {
+            res.status(200).json({
+                success: true,
+                data: response.data.metrics
+            });
+        } else {
+            throw new Error('Invalid response from ML service');
+        }
+    } catch (error) {
+        console.error('Model Performance Error:', error.message);
+        
+        // Graceful fallback
+        if (error.response && error.response.status === 404) {
+            res.status(404).json({
+                success: false,
+                message: 'Model metrics not available. Please train the model first.',
+                data: null
+            });
+        } else {
+            res.status(503).json({
+                success: false,
+                message: 'ML service unavailable. Please ensure the ML service is running.',
+                data: null
+            });
+        }
+    }
+};
+
+exports.getPredictionAccuracy = async (req, res) => {
+    try {
+        const ML_SERVICE_URL = process.env.ML_PRICE_API || process.env.ML_SERVICE_URL || 'http://127.0.0.1:5001';
+        
+        // Fetch sold properties with soldPrice
+        const soldProperties = await Property.find({ 
+            status: 'sold', 
+            soldPrice: { $exists: true, $gt: 0 } 
+        }).limit(100); // Limit to recent 100 sold properties for performance
+        
+        if (soldProperties.length === 0) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    accuracy_percentage: 0,
+                    total_properties: 0,
+                    message: 'No sold properties available for accuracy calculation'
+                }
+            });
+        }
+        
+        console.log(`Calculating prediction accuracy for ${soldProperties.length} sold properties`);
+        
+        // Calculate accuracy for each sold property
+        const accuracyPromises = soldProperties.map(async (property) => {
+            try {
+                // Get predicted price from ML service
+                const response = await axios.post(`${ML_SERVICE_URL}/predict-price`, {
+                    location: property.address.city,
+                    size: property.area,
+                    bhk: property.bedrooms,
+                    bath: property.bathrooms,
+                    amenitiesScore: property.features ? property.features.length : 5,
+                    propertyAge: 5
+                });
+                
+                const predictedPrice = response.data.predicted_price;
+                const actualPrice = property.soldPrice;
+                
+                // Calculate accuracy: 100 - (|predicted - actual| / actual * 100)
+                const errorPercentage = Math.abs(predictedPrice - actualPrice) / actualPrice * 100;
+                const accuracy = Math.max(0, 100 - errorPercentage);
+                
+                return {
+                    propertyId: property._id,
+                    predictedPrice,
+                    actualPrice,
+                    accuracy
+                };
+            } catch (error) {
+                console.error(`Error predicting for property ${property._id}:`, error.message);
+                return null;
+            }
+        });
+        
+        const results = await Promise.all(accuracyPromises);
+        const validResults = results.filter(r => r !== null);
+        
+        if (validResults.length === 0) {
+            return res.status(503).json({
+                success: false,
+                message: 'ML service unavailable or failed to predict prices',
+                data: null
+            });
+        }
+        
+        // Calculate average accuracy
+        const totalAccuracy = validResults.reduce((sum, r) => sum + r.accuracy, 0);
+        const averageAccuracy = totalAccuracy / validResults.length;
+        
+        res.status(200).json({
+            success: true,
+            data: {
+                accuracy_percentage: parseFloat(averageAccuracy.toFixed(2)),
+                total_properties: validResults.length,
+                sample_predictions: validResults.slice(0, 5).map(r => ({
+                    predicted: r.predictedPrice,
+                    actual: r.actualPrice,
+                    accuracy: parseFloat(r.accuracy.toFixed(2))
+                }))
+            }
+        });
+        
+    } catch (error) {
+        console.error('Prediction Accuracy Error:', error.message);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to calculate prediction accuracy',
+            error: error.message
+        });
+    }
+};

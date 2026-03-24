@@ -338,6 +338,11 @@ const registerAgent = async (req, res) => {
 
     // Send credentials email
     try {
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.warn('⚠️  Email credentials not configured. Agent credentials email will NOT be sent.');
+        console.warn('   Set EMAIL_USER and EMAIL_PASS in backend/.env to enable email notifications.');
+      }
+      
       const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login`;
       
       await transporter.sendMail({
@@ -413,11 +418,14 @@ const registerAgent = async (req, res) => {
         `
       });
 
-      console.log('Agent credentials email sent successfully to:', agent.email);
+      console.log('✅ Agent credentials email sent successfully to:', agent.email);
+      console.log('   Temporary password:', tempPassword);
 
     } catch (emailError) {
-      console.error('Email sending error:', emailError);
+      console.error('❌ Email sending error:', emailError.message);
+      console.error('Full error:', emailError);
       // Don't fail the registration if email fails, but log it
+      // Note: Make sure EMAIL_USER and EMAIL_PASS are configured in .env
     }
 
     // Get agent profile without password

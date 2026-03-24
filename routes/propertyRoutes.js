@@ -87,6 +87,35 @@ router.get('/test', async (req, res) => {
   }
 });
 
+// @route   GET /api/properties/agent/:agentId
+// @desc    Get all properties by agent ID
+// @access  Public (for viewing agent's listings)
+router.get('/agent/:agentId', async (req, res) => {
+  try {
+    const properties = await Property.find({ 
+      agent: req.params.agentId,
+      isActive: true,
+      status: { $in: ['active', 'sold'] }
+    })
+      .populate('agent', 'name email phone agentProfile')
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: properties,
+      message: 'Properties retrieved successfully'
+    });
+  } catch (error) {
+    console.error('Error fetching agent properties:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch properties',
+      error: error.message
+    });
+  }
+});
+
 // @route   GET /api/properties
 // @desc    Get all active properties (Public)
 // @access  Public

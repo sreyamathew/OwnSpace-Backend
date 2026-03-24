@@ -11,5 +11,7 @@ router.get('/location-distribution', analyticsController.getLocationDistribution
 router.get('/monthly-trends', analyticsController.getMonthlyTrends);
 router.get('/risk-distribution', analyticsController.getRiskDistribution);
 router.get('/ai-insights', analyticsController.getAIInsights);
+router.get('/model-performance', analyticsController.getModelPerformance);
+router.get('/prediction-accuracy', analyticsController.getPredictionAccuracy);
 
 module.exports = router;
