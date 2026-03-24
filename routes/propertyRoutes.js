@@ -92,18 +92,33 @@ router.get('/test', async (req, res) => {
 // @access  Public (for viewing agent's listings)
 router.get('/agent/:agentId', async (req, res) => {
   try {
-    const properties = await Property.find({ 
+    const { page = 1, limit = 10 } = req.query;
+    
+    const filter = { 
       agent: req.params.agentId,
       isActive: true,
       status: { $in: ['active', 'sold'] }
-    })
+    };
+
+    const properties = await Property.find(filter)
       .populate('agent', 'name email phone agentProfile')
       .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Property.countDocuments(filter);
 
     res.json({
       success: true,
-      data: properties,
+      data: {
+        properties,
+        pagination: {
+          current: parseInt(page),
+          pages: Math.ceil(total / limit),
+          total
+        }
+      },
       message: 'Properties retrieved successfully'
     });
   } catch (error) {
@@ -199,6 +214,70 @@ router.get('/', async (req, res) => {
       message: 'Failed to fetch properties',
       error: error.message
     });
+  }
+});
+
+// @route   GET /api/properties/recommendations
+// @desc    Get property recommendations based on user preferences
+// @access  Private
+router.get('/recommendations', protect, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    console.log('[RECS] userId:', userId);
+
+    const Preference = require('../models/Preference');
+    const prefDoc = await Preference.findOne({ userId });
+    console.log('[RECS] prefDoc found:', !!prefDoc);
+
+    if (!prefDoc || !prefDoc.preferences) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'No preferences found. Please set your preferences in your profile first.' 
+      });
+    }
+
+    const p = prefDoc.preferences;
+
+    let query = { isActive: true, status: 'active' };
+
+    if (p.locations && Array.isArray(p.locations) && p.locations.length > 0) {
+      query['address.city'] = { $in: p.locations.map(loc => new RegExp(loc, 'i')) };
+    }
+
+    if (p.minPrice || p.maxPrice) {
+      query.price = {};
+      if (p.minPrice && p.minPrice > 0) query.price.$gte = p.minPrice;
+      if (p.maxPrice && p.maxPrice > 0) query.price.$lte = p.maxPrice;
+      if (Object.keys(query.price).length === 0) delete query.price;
+    }
+
+    let properties = await Property.find(query).limit(50);
+    console.log('[RECS] properties found:', properties.length);
+
+    const scored = properties.map(prop => {
+      let score = 0;
+      const propCity = (prop.address && prop.address.city) ? prop.address.city.toLowerCase() : '';
+      const locations = (p.locations && Array.isArray(p.locations)) ? p.locations : [];
+      if (propCity && locations.some(loc => loc.toLowerCase() === propCity)) score += 0.4;
+      if (p.bhk && prop.bedrooms != null && prop.bedrooms === p.bhk) score += 0.3;
+      const propPrice = prop.price || 0;
+      if (p.maxPrice && p.maxPrice > 0) {
+        const priceDiff = Math.abs(propPrice - p.maxPrice);
+        score += (1 - Math.min(priceDiff / p.maxPrice, 1)) * 0.2;
+      } else {
+        score += 0.2;
+      }
+      const propArea = prop.area || 0;
+      if (p.minSize && p.minSize > 0 && propArea >= p.minSize) score += 0.1;
+      return { ...prop.toObject(), score };
+    });
+
+    const topRecommendations = scored.sort((a, b) => b.score - a.score).slice(0, 5);
+    res.json({ success: true, recommendations: topRecommendations });
+
+  } catch (err) {
+    console.error('[RECS] Recommendation error:', err.message);
+    res.status(500).json({ success: false, error: 'Recommendation failed', message: err.message });
   }
 });
 
@@ -564,6 +643,89 @@ router.post('/classify-risk', async (req, res) => {
       success: false,
       message: `ML_PROXY_ERROR: ${message}`,
       error: error.message
+    });
+  }
+});
+
+// @route   POST /api/properties/similar
+// @desc    Get similar properties based on attributes
+// @access  Public
+router.post('/similar', async (req, res) => {
+  try {
+    const { bedrooms, area, bathrooms, city, price, currentPropertyId } = req.body;
+
+    if (!city) {
+      return res.status(400).json({ 
+        success: false,
+        message: "City (location) is required" 
+      });
+    }
+
+    // Build query
+    const query = {
+      isActive: true,
+      status: 'active',
+      'address.city': new RegExp(city, 'i')
+    };
+
+    // Exclude current property if ID is provided
+    if (currentPropertyId) {
+      query._id = { $ne: currentPropertyId };
+    }
+
+    // Relaxed Fetch: Get all active properties in the same city
+    let similarProperties = await Property.find(query)
+      .populate('agent', 'name email phone agentProfile')
+      .limit(50); // Fetch more for scoring
+
+    // Similarity Scoring
+    const { propertyType } = req.body;
+    
+    similarProperties = similarProperties.map(prop => {
+      let score = 0;
+      
+      // 1. Property Type Match (High Priority)
+      if (propertyType && prop.propertyType && prop.propertyType.toLowerCase() === propertyType.toLowerCase()) {
+        score += 30;
+      }
+
+      // 2. Bedrooms Similarity (Closer is better)
+      if (bedrooms && prop.bedrooms) {
+        const bedDiff = Math.abs(prop.bedrooms - bedrooms);
+        score += Math.max(0, 25 * (1 - bedDiff / 2)); // Up to 2 difference
+      }
+
+      // 3. Area Similarity (Closer is better)
+      if (area && prop.area) {
+        const areaDiff = Math.abs(prop.area - area) / area;
+        score += Math.max(0, 25 * (1 - areaDiff)); 
+      }
+
+      // 4. Price Similarity (Closer is better)
+      if (price && prop.price) {
+        const priceDiff = Math.abs(prop.price - price) / price;
+        score += Math.max(0, 20 * (1 - priceDiff));
+      }
+
+      return { ...prop.toObject(), similarityScore: Math.round(score) };
+    });
+
+    // Sort by score descending
+    similarProperties.sort((a, b) => b.similarityScore - a.similarityScore);
+
+    // Return top 3 as requested
+    res.json({
+      success: true,
+      results: similarProperties.slice(0, 3),
+      message: 'Similar properties retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Error fetching similar properties:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Failed to fetch similar properties",
+      error: error.message 
     });
   }
 });
