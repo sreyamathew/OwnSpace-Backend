@@ -37,6 +37,28 @@ const offerSchema = new mongoose.Schema({
     enum: ['pending', 'accepted', 'rejected', 'withdrawn', 'advance_paid'],
     default: 'pending'
   },
+  documentStatus: {
+    type: String,
+    enum: ['not_uploaded', 'pending', 'approved', 'rejected'],
+    default: 'not_uploaded'
+  },
+  documents: [{
+    url: String,
+    name: String,
+    uploadedAt: { type: Date, default: Date.now }
+  }],
+  verificationRemarks: {
+    type: String
+  },
+  verificationDate: {
+    type: Date
+  },
+  buyerDetails: {
+    name: String,
+    address: String,
+    email: String,
+    phone: String
+  },
   createdAt: {
     type: Date,
     default: Date.now

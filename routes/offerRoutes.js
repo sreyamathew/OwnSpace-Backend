@@ -270,7 +270,7 @@ router.get('/:userId', protect, async (req, res) => {
 router.post('/:offerId/advance', protect, async (req, res) => {
   try {
     const { offerId } = req.params;
-    const { amount, orderId, paymentId, signature, method } = req.body || {};
+    const { amount, orderId, paymentId, signature, method, buyerDetails } = req.body || {};
 
     // Find the offer by ID
     const offer = await Offer.findById(offerId);
@@ -296,6 +296,14 @@ router.post('/:offerId/advance', protect, async (req, res) => {
       });
     }
 
+    // Require document verification
+    if (offer.documentStatus !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Documents must be verified and approved before advance payment'
+      });
+    }
+
     // Set advance payment details
     offer.advancePaid = true;
     offer.advanceAmount = Number(amount || 0);
@@ -308,6 +316,11 @@ router.post('/:offerId/advance', protect, async (req, res) => {
       method,
       date: new Date()
     };
+    
+    // Save buyer details for receipt
+    if (buyerDetails) {
+      offer.buyerDetails = buyerDetails;
+    }
 
     // Save the offer
     await offer.save();

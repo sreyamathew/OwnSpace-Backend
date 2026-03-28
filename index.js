@@ -15,8 +15,10 @@ const analyticsRoutes = require('./routes/analyticsRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const preferenceRoutes = require('./routes/preferenceRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const documentRoutes = require('./routes/documentRoutes');
 const { initSocket } = require('./utils/socket');
 const Razorpay = require('razorpay');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -134,6 +136,10 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/preferences', preferenceRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/documents', documentRoutes);
+
+// Optional: Serve static uploads directory for document accessing
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Payment: Razorpay order creation (test)
 const razorpay = new Razorpay({
