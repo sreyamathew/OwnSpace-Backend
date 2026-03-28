@@ -86,24 +86,58 @@ exports.getMonthlySalesTrend = async (req, res) => {
                 $match: {
                     $or: [
                         { status: 'sold' },
-                        { soldDate: { $exists: true } }
-                    ],
-                    soldDate: { $ne: null }
+                        { soldDate: { $exists: true, $ne: null } }
+                    ]
+                }
+            },
+            {
+                $project: {
+                    effectiveDate: { $ifNull: ['$soldDate', '$updatedAt'] },
+                    effectivePrice: { $ifNull: ['$soldPrice', '$price'] }
                 }
             },
             {
                 $group: {
-                    _id: { $dateToString: { format: "%Y-%m", date: "$soldDate" } },
-                    totalSales: { $sum: { $ifNull: ['$soldPrice', '$price'] } },
+                    _id: { $dateToString: { format: "%Y-%m", date: "$effectiveDate" } },
+                    totalSales: { $sum: "$effectivePrice" },
                     count: { $sum: 1 }
                 }
             },
             { $sort: { "_id": 1 } }
         ]);
 
+        // Ensure the last 6 months always have data
+        const today = new Date();
+        const last6Months = [];
+        for (let i = 5; i >= 0; i--) {
+            const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            last6Months.push({
+                _id: d.toLocaleString('default', { month: 'short' }),
+                sortKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+                totalSales: 0,
+                count: 0
+            });
+        }
+        
+        // Merge with actual data
+        trend.forEach(item => {
+            const index = last6Months.findIndex(m => m.sortKey === item._id);
+            if(index !== -1) {
+                last6Months[index].totalSales = item.totalSales;
+                last6Months[index].count = item.count;
+            }
+        });
+
+        // The frontend expects _id to be the display name
+        const formattedTrend = last6Months.map(m => ({
+            _id: m._id,
+            totalSales: m.totalSales,
+            count: m.count
+        }));
+
         res.status(200).json({
             success: true,
-            data: trend
+            data: formattedTrend
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
@@ -152,12 +186,21 @@ exports.getSoldList = async (req, res) => {
                 { soldDate: { $exists: true } }
             ]
         })
-            .select('title address price soldPrice predictedPrice riskCategory soldDate')
-            .sort({ soldDate: -1 });
+            .select('title address price soldPrice predictedPrice riskCategory soldDate updatedAt')
+            .sort({ soldDate: -1, updatedAt: -1 });
+
+        // Map and fallback soldDate to updatedAt if missing
+        const formattedProperties = properties.map(p => {
+            const data = p.toObject();
+            if (!data.soldDate) {
+                data.soldDate = data.updatedAt;
+            }
+            return data;
+        });
 
         res.status(200).json({
             success: true,
-            data: properties
+            data: formattedProperties
         });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });

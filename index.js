@@ -14,6 +14,7 @@ const notificationRoutes = require('./routes/notificationRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const preferenceRoutes = require('./routes/preferenceRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const { initSocket } = require('./utils/socket');
 const Razorpay = require('razorpay');
 
@@ -132,6 +133,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/preferences', preferenceRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Payment: Razorpay order creation (test)
 const razorpay = new Razorpay({
