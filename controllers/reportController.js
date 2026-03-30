@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Property = require('../models/Property');
 
 // @desc    Get sold properties reporting statistics
@@ -8,9 +9,14 @@ exports.getSoldStats = async (req, res) => {
         const stats = await Property.aggregate([
             {
                 $match: {
-                    $or: [
-                        { status: 'sold' },
-                        { soldDate: { $exists: true } }
+                    $and: [
+                        {
+                            $or: [
+                                { status: 'sold' },
+                                { soldDate: { $exists: true } }
+                            ]
+                        },
+                        req.userProfile.userType === 'agent' ? { agent: new mongoose.Types.ObjectId(req.userProfile._id) } : {}
                     ]
                 }
             },
@@ -51,9 +57,14 @@ exports.getSalesByLocation = async (req, res) => {
         const salesByLocation = await Property.aggregate([
             {
                 $match: {
-                    $or: [
-                        { status: 'sold' },
-                        { soldDate: { $exists: true } }
+                    $and: [
+                        {
+                            $or: [
+                                { status: 'sold' },
+                                { soldDate: { $exists: true } }
+                            ]
+                        },
+                        req.userProfile.userType === 'agent' ? { agent: new mongoose.Types.ObjectId(req.userProfile._id) } : {}
                     ]
                 }
             },
@@ -84,9 +95,14 @@ exports.getMonthlySalesTrend = async (req, res) => {
         const trend = await Property.aggregate([
             {
                 $match: {
-                    $or: [
-                        { status: 'sold' },
-                        { soldDate: { $exists: true, $ne: null } }
+                    $and: [
+                        {
+                            $or: [
+                                { status: 'sold' },
+                                { soldDate: { $exists: true, $ne: null } }
+                            ]
+                        },
+                        req.userProfile.userType === 'agent' ? { agent: new mongoose.Types.ObjectId(req.userProfile._id) } : {}
                     ]
                 }
             },
@@ -152,9 +168,14 @@ exports.getRiskDistribution = async (req, res) => {
         const riskData = await Property.aggregate([
             {
                 $match: {
-                    $or: [
-                        { status: 'sold' },
-                        { soldDate: { $exists: true } }
+                    $and: [
+                        {
+                            $or: [
+                                { status: 'sold' },
+                                { soldDate: { $exists: true } }
+                            ]
+                        },
+                        req.userProfile.userType === 'agent' ? { agent: new mongoose.Types.ObjectId(req.userProfile._id) } : {}
                     ]
                 }
             },
@@ -180,12 +201,22 @@ exports.getRiskDistribution = async (req, res) => {
 // @access  Private/Admin
 exports.getSoldList = async (req, res) => {
     try {
-        const properties = await Property.find({
-            $or: [
-                { status: 'sold' },
-                { soldDate: { $exists: true } }
+        const query = {
+            $and: [
+                {
+                    $or: [
+                        { status: 'sold' },
+                        { soldDate: { $exists: true } }
+                    ]
+                }
             ]
-        })
+        };
+
+        if (req.userProfile.userType === 'agent') {
+            query.$and.push({ agent: req.userProfile._id });
+        }
+
+        const properties = await Property.find(query)
             .select('title address price soldPrice predictedPrice riskCategory soldDate updatedAt')
             .sort({ soldDate: -1, updatedAt: -1 });
 

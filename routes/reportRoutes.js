@@ -11,7 +11,7 @@ const { protect, authorize } = require('../middleware/auth');
 
 // All report routes are admin-only
 router.use(protect);
-router.use(authorize('admin'));
+router.use(authorize('admin', 'agent'));
 
 router.get('/sold-stats', getSoldStats);
 router.get('/sales-by-location', getSalesByLocation);

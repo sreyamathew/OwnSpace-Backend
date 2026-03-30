@@ -492,7 +492,7 @@ router.get('/assigned', protect, async (req, res) => {
         // If pastOnly=true, include approved + visited + not visited and scheduled in the past
         if (String(pastOnly).toLowerCase() === 'true') {
             const now = new Date();
-            const statuses = ['approved', 'visited', 'not visited'];
+            const statuses = ['approved', 'visited', 'not visited', 'rejected'];
             mongooseQuery = VisitRequest.find({ ...baseQuery, status: { $in: statuses }, scheduledAt: { $lt: now } })
                 .populate({
                     path: 'property',
