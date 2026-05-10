@@ -59,6 +59,24 @@ router.post('/', protect, async (req, res) => {
 			return res.status(400).json({ success: false, message: 'Selected date is unavailable' });
 		}
 
+		// Business rule: block new requests if an APPROVED visit already exists
+		// for the same property on the same calendar date (regardless of time).
+		const dayStart = new Date(scheduled);
+		dayStart.setHours(0, 0, 0, 0);
+		const dayEnd = new Date(dayStart);
+		dayEnd.setDate(dayEnd.getDate() + 1);
+		const existingApprovedSameDay = await VisitRequest.findOne({
+			property: property._id,
+			status: 'approved',
+			scheduledAt: { $gte: dayStart, $lt: dayEnd }
+		}).select('_id scheduledAt');
+		if (existingApprovedSameDay) {
+			return res.status(409).json({
+				success: false,
+				message: 'An approved visit already exists for this property on the selected date. Please choose another date.'
+			});
+		}
+
 		const slotQuery = { property: property._id, date: ymd, startTime: hm, isBooked: false };
 		let slot = await VisitSlot.findOne(slotQuery);
 
@@ -449,7 +467,7 @@ router.get('/my', protect, async (req, res) => {
 				select: 'title address images agent',
 				populate: { path: 'agent', select: 'name' }
 			})
-			.sort({ scheduledAt: 1 });
+			.sort({ scheduledAt: -1 });
 		res.json({ success: true, data: items });
 	} catch (e) {
 		res.status(500).json({ success: false, message: 'Failed to fetch requests' });
@@ -474,7 +492,7 @@ router.get('/assigned', protect, async (req, res) => {
                 populate: { path: 'agent', select: 'name' }
             })
             .populate('requester', 'name email phone')
-            .sort({ scheduledAt: 1 });
+            .sort({ scheduledAt: -1 });
 
         // If futureOnly=true, filter scheduledAt to be in the future
         if (String(futureOnly).toLowerCase() === 'true') {
@@ -486,7 +504,7 @@ router.get('/assigned', protect, async (req, res) => {
                     populate: { path: 'agent', select: 'name' }
                 })
                 .populate('requester', 'name email phone')
-                .sort({ scheduledAt: 1 });
+                .sort({ scheduledAt: -1 });
         }
 
         // If pastOnly=true, include approved + visited + not visited and scheduled in the past
@@ -577,7 +595,7 @@ router.put('/:id/recipient-reschedule', protect, async (req, res) => {
 	}
 });
 
-// Cancel a visit by requester (marks as rejected)
+// Cancel a visit by requester (marks as rejected), or remove completed visits from buyer history (hard delete)
 router.delete('/:id', protect, async (req, res) => {
 	try {
 		const visit = await VisitRequest.findById(req.params.id);
@@ -585,6 +603,16 @@ router.delete('/:id', protect, async (req, res) => {
 		if (String(visit.requester) !== String(req.user.userId)) {
 			return res.status(403).json({ success: false, message: 'Not authorized to cancel this request' });
 		}
+
+		if (visit.status === 'visited' || visit.status === 'not visited') {
+			await VisitSlot.updateMany(
+				{ bookedByVisitId: visit._id },
+				{ $set: { isBooked: false }, $unset: { bookedByVisitId: 1 } }
+			);
+			await visit.deleteOne();
+			return res.json({ success: true, message: 'Visit removed from your list' });
+		}
+
 		visit.status = 'rejected';
 		await visit.save();
 		res.json({ success: true, message: 'Visit cancelled' });
