@@ -592,6 +592,34 @@ router.post('/predict-text', async (req, res) => {
   }
 });
 
+// @route   GET /api/properties/model-performance
+// @desc    Get ML model performance metrics (public for valuation UI)
+// @access  Public
+router.get('/model-performance', async (req, res) => {
+  try {
+    const mlApiUrl = process.env.ML_PRICE_API || 'http://localhost:5001';
+    console.log(`📡 Calling ML Service at: ${mlApiUrl}/model-performance`);
+
+    const response = await axios.get(`${mlApiUrl}/model-performance`);
+
+    res.json({
+      success: true,
+      data: response.data,
+      message: 'Model performance fetched successfully'
+    });
+  } catch (error) {
+    console.error('❌ ML Model Performance Error:', error.message);
+    const status = error.response ? error.response.status : 500;
+    const message = error.response?.data?.error || error.message || 'ML service is currently unavailable';
+
+    res.status(status).json({
+      success: false,
+      message: `ML_PROXY_ERROR: ${message}`,
+      error: error.message
+    });
+  }
+});
+
 // @route   POST /api/properties/classify-risk
 // @desc    Get risk classification from ML service
 // @access  Public

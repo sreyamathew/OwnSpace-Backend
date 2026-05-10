@@ -7,7 +7,9 @@ const {
     getMarketNews,
     createMarketNews,
     updateMarketNewsStatus,
-    deleteMarketNews
+    deleteMarketNews,
+    getAdminMessages,
+    replyToContactMessage
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -19,6 +21,8 @@ router.use(authorize('admin'));
 router.get('/dashboard-stats', getDashboardStats);
 router.get('/sales-reports', getSalesReports);
 router.get('/smart-alerts', getSmartAlerts);
+router.get('/messages', getAdminMessages);
+router.post('/messages/:messageId/reply', replyToContactMessage);
 
 // Market News management routes
 router.get('/market-news', getMarketNews);

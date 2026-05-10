@@ -1,6 +1,7 @@
 const Property = require('../models/Property');
 const User = require('../models/User');
 const MarketNews = require('../models/MarketNews');
+const transporter = require('../utils/mailer');
 
 exports.getDashboardStats = async (req, res) => {
     try {
@@ -251,5 +252,97 @@ exports.deleteMarketNews = async (req, res) => {
         res.status(200).json({ success: true, data: {} });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// --- Contact Messages ---
+exports.getAdminMessages = async (req, res) => {
+    try {
+        const adminId = req.userProfile?._id || req.user?.userId || req.user?._id || req.user?.id;
+        const adminUser = await User.findById(adminId).select('messages');
+        if (!adminUser) {
+            return res.status(404).json({ success: false, message: 'Admin user not found' });
+        }
+
+        const messages = (adminUser.messages || [])
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        res.status(200).json({
+            success: true,
+            data: messages
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.replyToContactMessage = async (req, res) => {
+    try {
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+            return res.status(503).json({
+                success: false,
+                message: 'Email service not configured (set EMAIL_USER and EMAIL_PASS)'
+            });
+        }
+
+        const adminId = req.userProfile?._id || req.user?.userId || req.user?._id || req.user?.id;
+        const { messageId } = req.params;
+        const { replyText = '', subject = '' } = req.body || {};
+
+        if (!messageId) {
+            return res.status(400).json({ success: false, message: 'messageId is required' });
+        }
+        if (!String(replyText).trim()) {
+            return res.status(400).json({ success: false, message: 'Reply text is required' });
+        }
+
+        const adminUser = await User.findById(adminId).select('messages email name');
+        if (!adminUser) {
+            return res.status(404).json({ success: false, message: 'Admin user not found' });
+        }
+
+        const msg = adminUser.messages?.id(messageId);
+        if (!msg) {
+            return res.status(404).json({ success: false, message: 'Message not found' });
+        }
+
+        const to = String(msg.email || '').trim();
+        if (!to) {
+            return res.status(400).json({ success: false, message: 'Recipient email not found on message' });
+        }
+
+        const safeSubject = String(subject).trim() || `Re: ${msg.subject || 'Your message to OwnSpace'}`;
+        const adminName = adminUser.name || 'OwnSpace Admin';
+
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to,
+            subject: safeSubject,
+            text: `Hello ${msg.name || ''},
+
+${String(replyText).trim()}
+
+---
+Original message:
+Subject: ${msg.subject || ''}
+From: ${msg.name || ''} <${msg.email || ''}>
+Date: ${msg.createdAt ? new Date(msg.createdAt).toLocaleString() : ''}
+
+${msg.message || ''}
+
+Regards,
+${adminName}
+`,
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        return res.status(200).json({
+            success: true,
+            message: 'Reply sent successfully'
+        });
+    } catch (error) {
+        console.error('Reply to contact message error:', error);
+        return res.status(500).json({ success: false, message: error.message || 'Failed to send reply' });
     }
 };

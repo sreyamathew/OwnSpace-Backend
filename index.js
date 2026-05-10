@@ -17,6 +17,7 @@ const preferenceRoutes = require('./routes/preferenceRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const documentRoutes = require('./routes/documentRoutes');
 const newsRoutes = require('./routes/newsRoutes');
+const contactRoutes = require('./routes/contactRoutes');
 const { initSocket } = require('./utils/socket');
 const Razorpay = require('razorpay');
 const path = require('path');
@@ -139,6 +140,7 @@ app.use('/api/preferences', preferenceRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/news', newsRoutes);
+app.use('/api/contact', contactRoutes);
 
 // Optional: Serve static uploads directory for document accessing
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

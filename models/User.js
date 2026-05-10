@@ -96,6 +96,47 @@ const userSchema = new mongoose.Schema({
       default: false
     }
   },
+  messages: [{
+    name: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    userType: {
+      type: String,
+      enum: ['buyer', 'agent'],
+      required: true
+    },
+    subject: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    message: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    isRead: {
+      type: Boolean,
+      default: false
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   otp: {
     type: String,
   },
