@@ -437,6 +437,101 @@ router.post('/:offerId/sell', protect, async (req, res) => {
   }
 });
 
+// Email buyer owner contact + balance amount (Admin or assigned Agent)
+router.post('/:offerId/send-balance-email', protect, async (req, res) => {
+  try {
+    const { offerId } = req.params;
+    const requester = req.userProfile;
+
+    if (!requester || !['admin', 'agent'].includes(requester.userType)) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    const offer = await Offer.findById(offerId)
+      .populate({ path: 'propertyId', select: 'title address price createdBy agent' })
+      .populate({ path: 'investorId', select: 'name email phone', model: 'User' });
+
+    if (!offer) {
+      return res.status(404).json({ success: false, message: 'Offer not found' });
+    }
+
+    if (requester.userType === 'agent' && String(offer.agentId) !== String(requester._id)) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
+
+    if (!offer.advancePaid) {
+      return res.status(400).json({ success: false, message: 'Advance payment is required before sending balance details' });
+    }
+
+    const property = offer.propertyId;
+    const buyerEmail = offer?.buyerDetails?.email || offer?.investorId?.email;
+    if (!buyerEmail) {
+      return res.status(400).json({ success: false, message: 'Buyer email not available' });
+    }
+
+    const ownerUserId = property?.createdBy;
+    const owner = ownerUserId
+      ? await User.findById(ownerUserId).select('name email phone')
+      : null;
+
+    const totalAmount = Number(offer.offerAmount || property?.price || 0);
+    const advanceAmount = Number(offer.advanceAmount || offer.paymentDetails?.amount || 0);
+    const balanceAmount = Math.max(0, totalAmount - advanceAmount);
+
+    const addressParts = [
+      property?.address?.street,
+      property?.address?.city,
+      property?.address?.state,
+      property?.address?.zipCode
+    ].filter(Boolean);
+
+    const ownerName = owner?.name || 'Property Owner';
+    const ownerEmail = owner?.email || 'N/A';
+    const ownerPhone = owner?.phone || 'N/A';
+
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: buyerEmail,
+      subject: 'Balance Payment Details & Owner Contact',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 640px; line-height: 1.5;">
+          <h2 style="margin:0 0 12px 0;">Balance Payment Details</h2>
+          <p>Hello ${offer?.investorId?.name || ''},</p>
+          <p>Here are the details to complete the balance payment for <strong>${property?.title || 'the property'}</strong>.</p>
+
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin:14px 0;">
+            <h3 style="margin:0 0 8px 0;font-size:16px;">Property</h3>
+            <div><strong>Address:</strong> ${addressParts.join(', ') || 'N/A'}</div>
+            <div><strong>Total Amount:</strong> ₹${totalAmount.toLocaleString('en-IN')}</div>
+            <div><strong>Advance Paid:</strong> ₹${advanceAmount.toLocaleString('en-IN')}</div>
+            <div><strong>Balance Amount:</strong> ₹${balanceAmount.toLocaleString('en-IN')}</div>
+          </div>
+
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin:14px 0;">
+            <h3 style="margin:0 0 8px 0;font-size:16px;">Owner Contact Details</h3>
+            <div><strong>Name:</strong> ${ownerName}</div>
+            <div><strong>Email:</strong> ${ownerEmail}</div>
+            <div><strong>Phone:</strong> ${ownerPhone}</div>
+          </div>
+
+          <p style="color:#6b7280;font-size:12px;margin-top:14px;">
+            If you have any questions, please contact the agent/admin via the OwnSpace portal.
+          </p>
+        </div>
+      `
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Balance payment email sent to buyer successfully',
+      data: { buyerEmail, balanceAmount, totalAmount, advanceAmount }
+    });
+  } catch (err) {
+    console.error('Error sending balance payment email:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
 // Update offer status (Approve/Reject)
 router.put('/:offerId', protect, async (req, res) => {
   try {
